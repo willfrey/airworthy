@@ -1,0 +1,11 @@
+# Changes here will be overwritten by Copier; edit with `copier update`.
+_commit: v0.6.2
+_src_path: gh:willfrey/copier-python
+author_email: jfrey89@gmail.com
+author_name: Will Frey
+description: Track aircraft write-ups from report to repair, and which aircraft can
+    fly.
+license: Proprietary
+package_name: airworthy
+project_name: airworthy
+pydantic: true

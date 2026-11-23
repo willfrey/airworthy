@@ -1,0 +1,74 @@
+#!/bin/sh
+# Mutation testing: run mutmut and fail on any mutant the tests don't catch. There is
+# no list of accepted survivors: kill a survivor with a test, or, for an equivalent
+# mutant, put `# pragma: no mutate — <reason>` on its line (AGENTS.md).
+set -eu
+cd "$(dirname "$0")/.."
+
+PYTEST_ADDOPTS=
+export PYTEST_ADDOPTS
+
+# The run's temp dir, removed at exit: it also holds the temporary root of a session
+# mutmut killed for running too long, which that session never got to remove. It is
+# made under the caller's TMPDIR, which macOS's mktemp reads only from a template. A
+# failed removal (a test left a folder it took the permissions of) names the folder
+# rather than failing: under set -e, the trap's failing rm would replace the run's
+# verdict with its own status.
+TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/mutation.XXXXXX")
+export TMPDIR
+trap 'rm -rf "$TMPDIR" || echo "could not remove the temp dir $TMPDIR" >&2' EXIT
+log="$TMPDIR/mutmut.log"
+
+rm -rf mutants
+status=0
+uv run --quiet --locked mutmut run >"$log" 2>&1 || status=$?
+
+# mutmut exits non-zero when it generates no mutants and so finds no test for any,
+# which is the honest state of a package with nothing yet for it to mutate. No mutant
+# code alone doesn't show that state: mutmut mutates only the lines its first test run
+# covered, so a test run that errors leaves none either, and fails here with the log.
+if ! grep -rqs "__mutmut_" mutants/src &&
+    grep -qs "could not find any test case for any mutant" "$log"; then
+    echo "mutmut generated no mutants in src/: nothing to test yet"
+    exit 0
+fi
+if [ "$status" -ne 0 ]; then
+    cat "$log" >&2
+    exit "$status"
+fi
+
+# A mutant that ran out of time while the run kept every core busy may only have been
+# slowed by the others. Run each again on its own: one that times out alone too hangs or
+# runs far slower, and stays caught; one that finishes gets its tests' verdict.
+timeouts=$(uv run --quiet --locked mutmut results | sed -n 's/^ *\(.*\): timeout$/\1/p')
+if [ -n "$timeouts" ]; then
+    echo "$timeouts" | xargs uv run --quiet --locked mutmut run --max-children 1 \
+        >>"$log" 2>&1 || {
+        cat "$log" >&2
+        exit 1
+    }
+fi
+
+# The verdict comes from mutmut's summary for CI, mutants/mutmut-cicd-stats.json, which
+# counts each status a mutant can end in. Caught: the tests failed (killed), hung or
+# ran far slower alone as well as in the run (timeout), or mypy rejected it (caught by
+# type check, which the summary leaves out). Every status counted below is a survivor.
+uv run --quiet --locked mutmut export-cicd-stats >/dev/null
+survived=$(uv run --quiet --locked python -c '
+import json
+stats = json.load(open("mutants/mutmut-cicd-stats.json", encoding="utf-8"))
+print(sum(stats[status] for status in (
+    "survived",
+    "no_tests",
+    "suspicious",
+    "skipped",
+    "segfault",
+    "check_was_interrupted_by_user",
+)))
+')
+if [ "$survived" -ne 0 ]; then
+    echo "$survived surviving mutants (uv run mutmut show <name> shows the change):" >&2
+    uv run --quiet --locked mutmut results |
+        grep -vE ': (timeout|caught by type check)$' >&2
+    exit 1
+fi

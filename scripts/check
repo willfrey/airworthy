@@ -1,0 +1,118 @@
+#!/bin/sh
+# Every check this project has. CI runs this script with no arguments, and nothing else
+# (.github/workflows/ci.yaml); run it the same way before each push.
+#
+#   scripts/check                  every step, in order
+#   scripts/check <step> [args]    one step, e.g. scripts/check pytest -x -k name
+#   scripts/check --list           the steps, in order
+#
+# The steps are the step_ functions below, in the order they're defined: the quick
+# ones first, so a slip fails in seconds, then the tests and the build. Mutation
+# testing is separate and slower: scripts/mutation.
+set -eu
+cd "$(dirname "$0")/.."
+
+# A PYTEST_ADDOPTS exported for other projects (`-n auto`, say) would change this run.
+PYTEST_ADDOPTS=
+export PYTEST_ADDOPTS
+
+run() {
+    # UV_LOCKED, uv's environment form of --locked: a step fails when uv.lock no longer
+    # matches pyproject.toml. Unlike the flag, it reaches every uv the tool starts in
+    # turn (ty's, below), so no tool run through here resolves afresh or writes a lock.
+    UV_LOCKED=1 uv run --quiet "$@"
+}
+
+step_ruff() {
+    # --no-fix: the check reports and never rewrites, whatever `fix` the config sets.
+    run ruff check --no-fix
+}
+
+step_format() {
+    run ruff format --check
+}
+
+step_typos() {
+    run typos
+}
+
+step_deptry() {
+    run deptry src
+}
+
+step_shellcheck() {
+    # The scripts git tracks or would add, so a new one is checked from its first run:
+    # not the Python ones, nor the lock a PEP 723 script keeps beside it.
+    # Through run, so the lock is checked here too.
+    run sh -c "git ls-files -z --cached --others --exclude-standard -- scripts \
+        ':!:*.py' ':!:*.py.lock' | xargs -0 shellcheck"
+}
+
+step_zizmor() {
+    # --offline: the online audits need a GitHub token, and the check must give the
+    # same verdict on every machine.
+    run zizmor --offline --quiet .
+}
+
+step_complexipy() {
+    run complexipy
+}
+
+step_imports() {
+    run lint-imports
+}
+
+step_mypy() {
+    run mypy
+}
+
+step_ty() {
+    # TY_UV: ty asks uv for the project's dependency graph, without which
+    # missing-direct-dependency, on through all = "error", never runs. It also checks
+    # each PEP 723 script against the environment of the script's own lock,
+    # <script>.py.lock, rather than .venv; through run, that lock must exist and match.
+    # ty calls the uv running this script, held to [tool.uv] required-version.
+    # Through env, so TY_UV reaches ty alone: an assignment before a shell function's
+    # call may outlast it.
+    run env TY_UV=1 ty check
+}
+
+step_pyrefly() {
+    run pyrefly check
+}
+
+step_pytest() {
+    run pytest "$@"
+}
+
+step_wheel() {
+    # The built wheel carries the py.typed marker, so type checkers trust its
+    # annotations.
+    uv build --quiet --wheel --clear
+    run python scripts/wheel_check.py dist/*.whl
+}
+
+steps() {
+    # This file, found from the project root the script moved to above.
+    sed -n 's/^step_\([a-z]*\)() {$/\1/p' "scripts/$(basename "$0")"
+}
+
+case "${1-}" in
+    "")
+        for step in $(steps); do
+            "step_$step"
+        done
+        ;;
+    --list)
+        steps
+        ;;
+    *)
+        step=$1
+        shift
+        if ! steps | grep -qx "$step"; then
+            echo "scripts/check: no step named '$step'; scripts/check --list names them" >&2
+            exit 2
+        fi
+        "step_$step" "$@"
+        ;;
+esac
