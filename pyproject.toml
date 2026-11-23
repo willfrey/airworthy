@@ -29,6 +29,11 @@ fallback-version = "0.0"
 [tool.hatch.build.targets.wheel]
 packages = ["src/airworthy"]
 
+# The py.typed marker, without which type checkers ignore the wheel's annotations. A
+# forced include fails the build when its file is missing, and no exclusion drops it.
+[tool.hatch.build.targets.wheel.force-include]
+"src/airworthy/py.typed" = "airworthy/py.typed"
+
 [tool.uv]
 # Reinstall the project when HEAD or the tags move, so the installed version, which
 # importlib.metadata reports, follows git.
