@@ -86,10 +86,9 @@ step_pytest() {
 }
 
 step_wheel() {
-    # The built wheel carries the py.typed marker, so type checkers trust its
-    # annotations.
-    uv build --quiet --wheel --clear
-    run python scripts/wheel_check.py dist/*.whl
+    # Not --quiet, which hides the build backend's reason for a failure: a missing
+    # py.typed marker among them ([tool.hatch.build.targets.wheel.force-include]).
+    uv build --wheel
 }
 
 steps() {
