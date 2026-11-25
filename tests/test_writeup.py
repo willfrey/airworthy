@@ -19,10 +19,12 @@ from airworthy.writeup import (
     Resolved,
     Scheduled,
     Severity,
+    Suggestion,
     Waiting,
     WriteUp,
     allowed,
     apply,
+    downgraded,
     known_at,
     latest,
     opened,
@@ -360,3 +362,55 @@ def test_a_state_allows_exactly_the_follow_ups_the_table_gives_it() -> None:
         Kind.RECLASSIFIED,
     )
     assert allowed(_closed(Severity.HIGH, 5, 5)) == (Kind.REOPENED, Kind.RECLASSIFIED)
+
+
+@pytest.mark.parametrize(
+    ("severity", "other", "below"),
+    [
+        (Severity.LOW, Severity.MEDIUM, True),
+        (Severity.LOW, Severity.HIGH, True),
+        (Severity.MEDIUM, Severity.HIGH, True),
+        (Severity.MEDIUM, Severity.MEDIUM, False),
+        (Severity.MEDIUM, Severity.LOW, False),
+        (Severity.HIGH, Severity.MEDIUM, False),
+        (Severity.HIGH, Severity.LOW, False),
+    ],
+)
+def test_a_severity_is_below_only_a_more_serious_one(
+    severity: Severity, other: Severity, *, below: bool
+) -> None:
+    """Medium below high is the case a string comparison gets wrong."""
+    assert severity.below(other) is below
+
+
+@pytest.mark.parametrize(
+    ("picked", "suggested", "expected"),
+    [
+        (Severity.MEDIUM, Severity.HIGH, True),
+        (Severity.HIGH, Severity.HIGH, False),
+        (Severity.HIGH, Severity.LOW, False),
+        (Severity.LOW, None, False),
+    ],
+)
+def test_a_report_is_downgraded_only_when_filed_below_its_suggestion(
+    picked: Severity, suggested: Severity | None, *, expected: bool
+) -> None:
+    suggestion = (
+        None
+        if suggested is None
+        else Suggestion(severity=suggested, reason="Looks loose")
+    )
+    reported = Reported(
+        at=_at(0),
+        by="Ana Reyes",
+        severity=picked,
+        description="Loose panel",
+        suggested=suggestion,
+    )
+
+    assert downgraded(reported) is expected
+
+
+def test_a_suggestion_needs_a_reason() -> None:
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        _ = Suggestion(severity=Severity.HIGH, reason="  ")

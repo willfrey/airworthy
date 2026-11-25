@@ -31,7 +31,11 @@ type Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1
 
 
 class Severity(StrEnum):
-    """How serious a defect is, as the person filing or correcting it judged."""
+    """How serious a defect is, as the person filing or correcting it judged.
+
+    The members are listed from the most serious to the least, and `below` reads that
+    order: a `StrEnum`'s own `<` is alphabetical, which puts medium above high.
+    """
 
     HIGH = "high"
     MEDIUM = "medium"
@@ -48,6 +52,42 @@ class Severity(StrEnum):
             case unreachable:
                 assert_never(unreachable)
 
+    @property
+    def meaning(self) -> str:
+        """What the severity means, as a model asked to suggest one is told."""
+        match self:
+            case Severity.HIGH:
+                return (
+                    "the aircraft should not fly until this is repaired. Choose it when"
+                    " the defect could affect the safety of a flight: structure, flight"
+                    " controls, engines, fuel, landing gear, pressurization, fire"
+                    " protection, or instruments and systems a flight depends on."
+                )
+            case Severity.MEDIUM:
+                return "the aircraft can fly, and the repair should be planned soon."
+            case Severity.LOW:
+                return (
+                    "cosmetic or a matter of comfort, with no effect on the safety of a"
+                    " flight."
+                )
+            case unreachable:
+                assert_never(unreachable)
+
+    def below(self, other: Severity) -> bool:
+        """Tell whether this severity is less serious than `other`."""
+        order = list(Severity)
+        return order.index(self) > order.index(other)
+
+
+class Suggestion(Model):
+    """A severity a model suggested for a description, and its reason.
+
+    It informs the person filing and decides nothing: `Reported.severity` is theirs.
+    """
+
+    severity: Severity
+    reason: Text
+
 
 class Event(Model):
     """Something a named person did to a write-up at a moment."""
@@ -57,11 +97,16 @@ class Event(Model):
 
 
 class Reported(Event):
-    """The report that opens a write-up, at the severity its reporter chose."""
+    """The report that opens a write-up, at the severity its reporter chose.
+
+    `suggested` records what a model suggested, when the reporter asked for it. It is
+    kept beside the choice and never read as the severity.
+    """
 
     kind: Literal["reported"] = "reported"
     severity: Severity
     description: Text
+    suggested: Suggestion | None = None
 
 
 class Kind(StrEnum):
@@ -305,6 +350,12 @@ def standing(state: State, moment: datetime) -> Standing:
     if on is None:
         return Waiting()
     return Overdue(on=on) if on < utc_day(moment) else Due(on=on)
+
+
+def downgraded(reported: Reported) -> bool:
+    """Tell whether a report was filed below the severity a model suggested for it."""
+    suggested = reported.suggested
+    return suggested is not None and reported.severity.below(suggested.severity)
 
 
 def utc_day(moment: datetime) -> date:

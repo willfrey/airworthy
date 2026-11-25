@@ -13,7 +13,8 @@ from jinja2 import UndefinedError
 from airworthy import seed
 from airworthy.fleet import Aircraft
 from airworthy.store import Store
-from airworthy.web import ENVIRONMENT, create_app, main
+from airworthy.triage import NoSuggestionError
+from airworthy.web import ENVIRONMENT, Pages, create_app, main
 from airworthy.writeup import (
     Reclassified,
     Reopened,
@@ -21,6 +22,7 @@ from airworthy.writeup import (
     Resolved,
     Scheduled,
     Severity,
+    Suggestion,
 )
 
 if TYPE_CHECKING:
@@ -541,3 +543,250 @@ def test_only_a_write_up_waiting_or_overdue_is_marked_for_attention(
     assert '<p class="standing">' in resolved.split("</p>")[0]
     assert '<p class="standing">medium severity, open, repair set for' in page
     assert '<p class="standing overdue">medium severity, open, overdue' in overdue
+
+
+def _suggest(description: str) -> Suggestion:
+    return Suggestion(severity=Severity.HIGH, reason=f"<i>About</i>: {description}")
+
+
+def _no_suggestion(description: str) -> Suggestion:
+    msg = f"nothing to say about {description}"
+    raise NoSuggestionError(msg)
+
+
+@pytest.fixture
+def triaged(store: Store) -> TestClient:
+    """Give a browser on an app whose suggester always suggests high."""
+    return TestClient(create_app(store, _now, _suggest), follow_redirects=False)
+
+
+def _carried(page: Response) -> str:
+    """Give what the filing form's hidden field carries back, as a browser posts it."""
+    found = re.search(r'name="suggested" value="([^"]*)"', page.text)
+    assert found is not None
+    return unescape(found.group(1))
+
+
+def test_asking_for_a_suggestion_shows_it_and_files_nothing(
+    triaged: TestClient, store: Store
+) -> None:
+    form = {"description": " Fluid under the left gear ", "by": "Ana Reyes"}
+
+    page = triaged.post("/aircraft/N101AW/suggestion", data=form)
+
+    assert page.status_code == HTTPStatus.OK
+    assert _part(page, "suggestion", "</p>") == (
+        "Suggested severity: high . A model generated this from the description;"
+        " the choice below is yours."
+    )
+    assert "<summary>Why</summary>&lt;i&gt;About&lt;/i&gt;: Fluid under" in page.text
+    assert ">Fluid under the left gear</textarea>" in page.text
+    assert "checked" not in page.text
+    assert len(store.write_ups("N101AW")) == 1
+
+
+def test_a_suggestion_is_recorded_beside_the_severity_the_person_picked(
+    triaged: TestClient, store: Store
+) -> None:
+    asked = {"description": "Fluid under the left gear"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
+    form = {**asked, "by": "Ana Reyes", "severity": "medium", "suggested": suggested}
+
+    answer = triaged.post("/aircraft/N101AW/write-ups", data=form)
+
+    assert answer.status_code == HTTPStatus.SEE_OTHER
+    assert store.write_ups("N101AW")[-1].reported == Reported(
+        at=NOW,
+        by="Ana Reyes",
+        severity=Severity.MEDIUM,
+        description="Fluid under the left gear",
+        suggested=_suggest("Fluid under the left gear"),
+    )
+    assert _part(triaged.get("/aircraft/N101AW"), "write-up-11", "</li>").endswith(
+        "Ana Reyes reported it as medium (a model suggested high: <i>About</i>:"
+        " Fluid under the left gear) Filed below the suggested severity."
+    )
+
+
+def test_a_report_filed_at_the_suggested_severity_carries_no_warning(
+    triaged: TestClient,
+) -> None:
+    asked = {"description": "Tyre worn"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
+    form = {"by": "Ana", "severity": "high", "description": "Tyre worn"}
+
+    _ = triaged.post(
+        "/aircraft/N101AW/write-ups", data={**form, "suggested": suggested}
+    )
+
+    assert _part(triaged.get("/aircraft/N101AW"), "write-up-11", "</li>").endswith(
+        "Ana reported it as high (a model suggested high: <i>About</i>: Tyre worn)"
+    )
+
+
+def test_a_report_filed_without_asking_tells_of_no_suggestion(
+    triaged: TestClient,
+) -> None:
+    form = {"by": "Ana", "severity": "low", "description": "Tyre worn"}
+
+    _ = triaged.post("/aircraft/N101AW/write-ups", data=form)
+
+    history = _part(triaged.get("/aircraft/N101AW"), "write-up-11", "</li>")
+    assert history.endswith("Ana reported it as low")
+
+
+@pytest.mark.parametrize(
+    ("carried", "problem"),
+    [
+        ("{high", "suggested: Invalid JSON: key must be a string at line 1 column 2"),
+        (
+            '{"suggestion": {"severity": "extreme", "reason": "Fluid"}, "seal": "0"}',
+            "severity: Input should be 'high', 'medium' or 'low'",
+        ),
+    ],
+)
+def test_a_carried_suggestion_that_is_not_one_is_refused(
+    triaged: TestClient, store: Store, carried: str, problem: str
+) -> None:
+    form = {"by": "Ana", "severity": "low", "description": "Tyre worn"}
+
+    page = triaged.post(
+        "/aircraft/N101AW/write-ups", data={**form, "suggested": carried}
+    )
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == problem
+    assert len(store.write_ups("N101AW")) == 1
+
+
+def test_a_suggestion_is_not_recorded_for_a_description_it_was_not_made_for(
+    triaged: TestClient, store: Store
+) -> None:
+    """The person asked about one description, then filed another."""
+    asked = {"description": "Coffee stain on a seat"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
+    form = {"description": "Engine fire warning light on", "suggested": suggested}
+
+    page = triaged.post(
+        "/aircraft/N101AW/write-ups", data={**form, "by": "Ana", "severity": "low"}
+    )
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == (
+        "that suggestion was not made for this description; ask for another, or file"
+        " without one"
+    )
+    assert ">Engine fire warning light on</textarea>" in page.text
+    assert 'name="suggested"' not in page.text
+    assert len(store.write_ups("N101AW")) == 1
+
+
+def test_a_suggestion_this_app_did_not_seal_is_refused(
+    client: TestClient, triaged: TestClient, store: Store
+) -> None:
+    """Another app sealed it, with a key of its own: here it is as good as made up."""
+    asked = {"description": "Tyre worn"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
+    form = {**asked, "by": "Ana", "severity": "low", "suggested": suggested}
+
+    page = client.post("/aircraft/N101AW/write-ups", data=form)
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page).startswith("that suggestion was not made for this")
+    assert len(store.write_ups("N101AW")) == 1
+
+
+@pytest.mark.parametrize("form", [{}, {"description": "   "}])
+def test_a_suggestion_needs_a_description(
+    triaged: TestClient, form: dict[str, str]
+) -> None:
+    page = triaged.post("/aircraft/N101AW/suggestion", data=form)
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == "description: String should have at least 1 character"
+    assert 'id="suggestion"' not in page.text
+
+
+def test_a_suggestion_the_model_did_not_give_keeps_what_was_typed(
+    store: Store,
+) -> None:
+    app = create_app(store, _now, _no_suggestion)
+
+    page = TestClient(app).post(
+        "/aircraft/N101AW/suggestion", data={"description": "Tyre worn"}
+    )
+
+    assert page.status_code == HTTPStatus.BAD_GATEWAY
+    assert _problem(page) == "nothing to say about Tyre worn"
+    assert ">Tyre worn</textarea>" in page.text
+    assert 'id="suggestion"' not in page.text
+
+
+def test_a_suggestion_for_an_unknown_aircraft_is_not_found_and_asks_no_model(
+    store: Store,
+) -> None:
+    asked: list[str] = []
+
+    def suggest(description: str) -> Suggestion:
+        asked.append(description)
+        return _suggest(description)
+
+    browser = TestClient(create_app(store, _now, suggest))
+
+    page = browser.post("/aircraft/N999ZZ/suggestion", data={"description": "Tyre"})
+
+    assert page.status_code == HTTPStatus.NOT_FOUND
+    assert _problem(page) == "no aircraft N999ZZ"
+    assert asked == []
+
+
+def test_a_page_asked_for_without_a_moment_is_shown_as_of_now(store: Store) -> None:
+    """Called as a function, as the app calls it once a request has no `at`."""
+    pages = Pages(store=store, clock=_now, suggester=None, key=b"a key")
+
+    assert pages.board().status_code == HTTPStatus.OK
+    assert pages.aircraft("N101AW").status_code == HTTPStatus.OK
+
+
+def test_an_app_with_no_suggester_neither_offers_nor_serves_a_suggestion(
+    client: TestClient, triaged: TestClient
+) -> None:
+    offer = '<button formaction="/aircraft/N101AW/suggestion" formnovalidate>'
+    asked = {"description": "Tyre worn"}
+
+    assert offer in triaged.get("/aircraft/N101AW").text
+    assert "formaction" not in client.get("/aircraft/N101AW").text
+    assert (
+        client.post("/aircraft/N101AW/suggestion", data=asked).status_code
+        == HTTPStatus.NOT_FOUND
+    )
+
+
+def test_the_sample_fleet_tells_of_a_report_filed_below_its_suggestion(
+    client: TestClient,
+) -> None:
+    history = _part(client.get("/aircraft/N105AW"), "write-up-7", "</li>")
+
+    assert "reported it as medium (a model suggested high: Stiff nose" in history
+    assert history.endswith("Filed below the suggested severity.")
+
+
+@pytest.mark.parametrize(
+    ("environ", "offered"),
+    [
+        ({"ANTHROPIC_API_KEY": "a-key"}, True),
+        ({"ANTHROPIC_API_KEY": ""}, False),
+        ({}, False),
+    ],
+)
+def test_main_offers_suggestions_only_with_a_key_for_the_model(
+    served: list[tuple[FastAPI, int]], environ: dict[str, str], *, offered: bool
+) -> None:
+    def serve(app: FastAPI, *, port: int) -> None:
+        served.append((app, port))
+
+    main([], serve, environ)
+
+    [(app, _)] = served
+    page = TestClient(app).get("/aircraft/N101AW")
+    assert ("Suggest a severity" in page.text) is offered

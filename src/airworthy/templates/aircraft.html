@@ -14,7 +14,7 @@
   Cleared to fly
   {% endif %}
 </p>
-{% if problem %}<p class="problem" role="alert">{{ problem }}</p>{% endif %}
+{% if problem %}<p class="problem" role="alert">{{ problem.text }}</p>{% endif %}
 
 {% for entry in row.entries %}
 {% set write_up = entry.write_up %}
@@ -23,7 +23,12 @@
   <h2>#{{ write_up.id }} {{ write_up.reported.description }}</h2>
   <p class="standing{{ " overdue" if entry.stands.urgent else "" }}">{{ state.severity }} severity, {{ entry.stands.text }}</p>
   <ol class="history">
-    <li>{{ stamp(write_up.reported.at) }} {{ write_up.reported.by }} reported it as {{ write_up.reported.severity }}</li>
+    <li>{{ stamp(write_up.reported.at) }} {{ write_up.reported.by }} reported it as {{ write_up.reported.severity }}
+      {% if write_up.reported.suggested %}
+      (a model suggested {{ write_up.reported.suggested.severity }}: {{ write_up.reported.suggested.reason }})
+      {% endif %}
+      {% if entry.downgraded %}<strong class="overdue">Filed below the suggested severity.</strong>{% endif %}
+    </li>
     {% for event in write_up.later %}
     <li>{{ stamp(event.at) }} {{ event.by }} {{ told(event) }}</li>
     {% endfor %}
@@ -43,7 +48,14 @@
 <form method="post" action="/aircraft/{{ tail }}/write-ups">
   <fieldset>
     <legend>File a write-up</legend>
-    <p><label>What is wrong <textarea name="description" rows="2" cols="60" required></textarea></label></p>
+    <p><label>What is wrong <textarea name="description" rows="2" cols="60" required>{{ draft.description if draft else "" }}</textarea></label></p>
+    {% if draft and draft.suggested %}
+    <p id="suggestion">Suggested severity: <strong>{{ draft.suggested.suggestion.severity }}</strong>.
+      A model generated this from the description; the choice below is yours.
+      <input type="hidden" name="suggested" value="{{ draft.suggested.model_dump_json() }}">
+    </p>
+    <details><summary>Why</summary>{{ draft.suggested.suggestion.reason }}</details>
+    {% endif %}
     <p>Severity (a high one grounds the aircraft until it is resolved):
       <label><input type="radio" name="severity" value="high" required> high</label>
       <label><input type="radio" name="severity" value="medium"> medium</label>
@@ -51,6 +63,9 @@
     </p>
     <p><label>Your name <input name="by" required></label></p>
     <button>File the write-up</button>
+    {% if suggests %}
+    <button formaction="/aircraft/{{ tail }}/suggestion" formnovalidate>Suggest a severity</button>
+    {% endif %}
   </fieldset>
 </form>
 {% endif %}
