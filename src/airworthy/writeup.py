@@ -17,14 +17,15 @@ log to what was known at a moment.
 from dataclasses import dataclass, replace
 from datetime import UTC, date
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, assert_never
+from typing import Annotated, Literal, assert_never
+
+# Building a schema from `Open` or `Closed` reads its annotations at run time, so
+# this name must exist then.
+lazy from datetime import datetime
 
 from pydantic import AwareDatetime, Field, StringConstraints
 
 from airworthy.model import Model
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 type Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 """Text a person wrote: stripped, and never blank."""
@@ -177,6 +178,8 @@ class Open:
     scheduled_for: date | None
     as_of: datetime
     """When the last event applied happened."""
+    kind: Literal["open"] = "open"
+    """Names the state where it is written out, as an event's `kind` names the event."""
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -189,6 +192,8 @@ class Closed:
     note: str
     as_of: datetime
     """When the last event applied happened: past `at` after a later correction."""
+    kind: Literal["resolved"] = "resolved"
+    """Names the state where it is written out."""
 
 
 type State = Open | Closed

@@ -11,6 +11,9 @@ forms: an action is always taken now, by the server's clock.
 With a suggester, the filing form can ask for a suggested severity. Asking files
 nothing, and the suggestion never fills in the severity: it is shown beside the choice
 and recorded with the report.
+
+With an asker, the board has a box for a question about the fleet. The answer is a
+model's, made from reads of the store, and is shown above the board, never in its place.
 """
 
 import argparse
@@ -32,7 +35,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import ConfigDict, Json, ValidationError
 
-from airworthy import seed
+from airworthy import ops, seed
 from airworthy.fleet import Cleared, Grounded, status_at
 from airworthy.model import Model, faults
 from airworthy.store import NotFoundError, Store
@@ -83,6 +86,7 @@ DATABASE: Final = "airworthy.db"
 FILE: Final = "/aircraft/{tail}/write-ups"
 EVENTS: Final = "/write-ups/{write_up_id}/events"
 SUGGEST: Final = "/aircraft/{tail}/suggestion"
+ASK: Final = "/questions"
 API_KEY: Final = "ANTHROPIC_API_KEY"
 NOT_FOR_THIS: Final = (
     "that suggestion was not made for this description; ask for another, or file"
@@ -113,6 +117,12 @@ class Described(Model):
     """A description to ask a suggestion for."""
 
     description: Text
+
+
+class Question(Model):
+    """A question to put to the model."""
+
+    question: Text
 
 
 class Sealed(Model):
@@ -201,6 +211,14 @@ class Problem:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
+class Asked:
+    """A question put to the board, with the model's answer when it gave one."""
+
+    question: str
+    answer: str | None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
 class Draft:
     """A write-up being filled in: what was typed, and the suggestion asked for."""
 
@@ -230,6 +248,8 @@ class Pages:
     clock: Clock
     suggester: Suggester | None
     """Suggests a severity; without one the filing form doesn't offer to."""
+    asker: ops.Ask | None
+    """Answers a question about the fleet; without one the board has no question box."""
     key: bytes
     """Seals each suggestion to its description; a secret of this app alone."""
 
@@ -268,10 +288,49 @@ class Pages:
 
     def board(self, at: str = "") -> HTMLResponse:
         """Show the fleet, now or as it stood at `at`."""
+        return self.fleet(at)
+
+    def fleet(
+        self, at: str, *, asked: Asked | None = None, problem: Problem | None = None
+    ) -> HTMLResponse:
+        """Show the board, with a question asked of it and what came of asking."""
         moment = _moment(at, self.clock())
         fleet = self.store.all_aircraft()
-        rows = [_row(self.store, aircraft, moment) for aircraft in fleet]
-        return _page(BOARD, at=at, moment=moment, rows=rows)
+        return _page(
+            BOARD,
+            HTTPStatus.OK if problem is None else problem.status,
+            at=at,
+            moment=moment,
+            rows=[_row(self.store, aircraft, moment) for aircraft in fleet],
+            asks=self.asker is not None,
+            asked=asked,
+            problem=problem,
+        )
+
+    def reads(self) -> ops.Reads:
+        """Give what a question's tools may read: this store, by this clock."""
+        return ops.Reads(now=self.clock, fleet=self.listed, write_ups=self.filed)
+
+    def listed(self, at: datetime | None) -> tuple[ops.Listed, ...]:
+        """List every aircraft with its status at a moment, or now for `None`."""
+        moment = self.clock() if at is None else at
+        fleet = self.store.all_aircraft()
+        return tuple(
+            ops.Listed(
+                aircraft=aircraft,
+                status=status_at(self.store.write_ups(aircraft.tail), moment),
+            )
+            for aircraft in fleet
+        )
+
+    def filed(self, tail: str) -> tuple[ops.Filed, ...] | None:
+        """Give an aircraft's write-ups as they stand, or `None` for no such tail."""
+        try:
+            _ = self.store.aircraft(tail)
+        except NotFoundError:
+            return None
+        logs = self.store.write_ups(tail)
+        return tuple(ops.Filed(write_up=log, state=latest(log)) for log in logs)
 
     def aircraft(self, tail: str, at: str = "") -> HTMLResponse:
         """Show one aircraft, now or as it stood at `at`."""
@@ -342,8 +401,34 @@ class Triage:
         return self.pages.page(tail, now, draft=draft)
 
 
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Questions:
+    """The route that answers a question about the fleet, which changes nothing."""
+
+    pages: Pages
+    ask: ops.Ask
+
+    def answer(self, form: Annotated[ActionForm, Form()]) -> HTMLResponse:
+        """Show the board with a model's answer to the question asked."""
+        posted = {"question": form.posted().get("question", "")}
+        try:
+            question = Question.model_validate(posted).question
+        except ValidationError as error:
+            return self.pages.fleet("", problem=Problem(text=_problems(error)))
+        try:
+            answer = self.ask(question, self.pages.reads())
+        except ops.NoAnswerError as error:
+            problem = Problem(text=str(error), status=HTTPStatus.BAD_GATEWAY)
+            asked = Asked(question=question, answer=None)
+            return self.pages.fleet("", asked=asked, problem=problem)
+        return self.pages.fleet("", asked=Asked(question=question, answer=answer))
+
+
 def create_app(
-    store: Store, clock: Clock, suggester: Suggester | None = None
+    store: Store,
+    clock: Clock,
+    suggester: Suggester | None = None,
+    asker: ops.Ask | None = None,
 ) -> FastAPI:
     """Build the app over a store, taking the time of each action from `clock`.
 
@@ -352,6 +437,8 @@ def create_app(
         clock: Tells the moment of each action and of a page shown as of now.
         suggester: Suggests a severity for a description. Without one the pages offer
             no suggestion and the app has no route that asks for one.
+        asker: Answers a question about the fleet from what it is let read. Without
+            one the board has no question box and the app has no route for one.
 
     Returns:
         The app, ready to serve.
@@ -359,7 +446,7 @@ def create_app(
     app = FastAPI()
     # A new key for each app: a suggestion sealed before a restart is refused after it.
     key = secrets.token_bytes()
-    pages = Pages(store=store, clock=clock, suggester=suggester, key=key)
+    pages = Pages(store=store, clock=clock, suggester=suggester, asker=asker, key=key)
     app.add_api_route("/", pages.board)
     app.add_api_route("/aircraft/{tail}", pages.aircraft)
     app.add_api_route(FILE, pages.file, methods=POST, response_model=None)
@@ -367,6 +454,9 @@ def create_app(
     if pages.suggester is not None:
         triage = Triage(pages=pages, ask=pages.suggester)
         app.add_api_route(SUGGEST, triage.suggestion, methods=POST)
+    if pages.asker is not None:
+        questions = Questions(pages=pages, ask=pages.asker)
+        app.add_api_route(ASK, questions.answer, methods=POST)
     app.add_exception_handler(NotFoundError, _not_found)
     app.add_exception_handler(NotATimeError, _not_a_time)
     return app
@@ -384,8 +474,8 @@ def main(
             to keep between runs, which gets the sample fleet only while it holds no
             aircraft.
         serve: Serves the app; a test passes one that returns.
-        environ: The environment. Severity suggestions are offered only when it holds
-            a key for the model.
+        environ: The environment. Severity suggestions and the board's question box
+            are offered only when it holds a key for the model.
     """
     parser = argparse.ArgumentParser()
     _ = parser.add_argument("--port", type=int)
@@ -398,8 +488,10 @@ def main(
     store = Store.at(database)
     if not store.all_aircraft():
         seed.load(store, _now())
-    suggester = suggest if environ.get(API_KEY, "") != "" else None
-    serve(create_app(store, _now, suggester), port=options.port)
+    keyed = environ.get(API_KEY, "") != ""
+    suggester = suggest if keyed else None
+    asker = ops.ask if keyed else None
+    serve(create_app(store, _now, suggester, asker), port=options.port)
 
 
 def _now() -> datetime:

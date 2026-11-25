@@ -1,7 +1,7 @@
 """The pages show what the logs say at a moment, and a form acts or is refused."""
 
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from html import unescape
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Final
@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from jinja2 import UndefinedError
 
-from airworthy import seed
+from airworthy import ops, seed
 from airworthy.fleet import Aircraft
 from airworthy.store import Store
 from airworthy.triage import NoSuggestionError
@@ -742,7 +742,7 @@ def test_a_suggestion_for_an_unknown_aircraft_is_not_found_and_asks_no_model(
 
 def test_a_page_asked_for_without_a_moment_is_shown_as_of_now(store: Store) -> None:
     """Called as a function, as the app calls it once a request has no `at`."""
-    pages = Pages(store=store, clock=_now, suggester=None, key=b"a key")
+    pages = Pages(store=store, clock=_now, suggester=None, asker=None, key=b"a key")
 
     assert pages.board().status_code == HTTPStatus.OK
     assert pages.aircraft("N101AW").status_code == HTTPStatus.OK
@@ -779,7 +779,7 @@ def test_the_sample_fleet_tells_of_a_report_filed_below_its_suggestion(
         ({}, False),
     ],
 )
-def test_main_offers_suggestions_only_with_a_key_for_the_model(
+def test_main_offers_what_a_model_does_only_with_a_key_for_it(
     served: list[tuple[FastAPI, int]], environ: dict[str, str], *, offered: bool
 ) -> None:
     def serve(app: FastAPI, *, port: int) -> None:
@@ -788,8 +788,9 @@ def test_main_offers_suggestions_only_with_a_key_for_the_model(
     main([], serve, environ)
 
     [(app, _)] = served
-    page = TestClient(app).get("/aircraft/N101AW")
-    assert ("Suggest a severity" in page.text) is offered
+    browser = TestClient(app)
+    assert ("Suggest a severity" in browser.get("/aircraft/N101AW").text) is offered
+    assert ("Ask about the fleet" in browser.get("/").text) is offered
 
 
 def test_the_board_marks_the_overdue_column_only_where_a_repair_is_overdue(
@@ -802,3 +803,98 @@ def test_the_board_marks_the_overdue_column_only_where_a_repair_is_overdue(
 
     assert '<td class="overdue">#4 </td>' in late
     assert '<td class="">none</td>' in quiet
+
+
+def _statuses(fleet: tuple[ops.Listed, ...]) -> str:
+    return ", ".join(
+        f"{listed.aircraft.tail} {type(listed.status).__name__}" for listed in fleet
+    )
+
+
+def _answer(question: str, reads: ops.Reads) -> str:
+    """Answer with the question and what each read gives, as a model's tools see it."""
+    filed = reads.write_ups("N103AW") or ()
+    stands = ", ".join(
+        f"#{one.write_up.id} {type(one.state).__name__}" for one in filed
+    )
+    return (
+        f"<q>{question}</q> at {reads.now():%Y-%m-%d %H:%M}."
+        f" Now: {_statuses(reads.fleet(None))}."
+        f" Before: {_statuses(reads.fleet(NOW - timedelta(days=2)))}."
+        f" N103AW: {stands}. N999ZZ: {reads.write_ups('N999ZZ')}."
+    )
+
+
+def _no_answer(question: str, _reads: ops.Reads) -> str:
+    msg = f"nothing to say about {question}"
+    raise ops.NoAnswerError(msg)
+
+
+@pytest.fixture
+def asking(store: Store) -> TestClient:
+    """Give a browser on an app whose question box answers with `_answer`."""
+    return TestClient(create_app(store, _now, asker=_answer))
+
+
+def test_a_question_is_answered_from_this_store_by_this_clock(
+    asking: TestClient,
+) -> None:
+    """The answer shows what the reads gave, so reads wired elsewhere would show."""
+    page = asking.post("/questions", data={"question": "Which can fly?"})
+
+    assert page.status_code == HTTPStatus.OK
+    assert _part(page, "answer", "</p>") == (
+        "<q>Which can fly?</q> at 2026-03-03 07:30."
+        " Now: N101AW Cleared, N102AW Grounded, N103AW Cleared, N104AW Grounded,"
+        " N105AW Grounded, N106AW Grounded."
+        " Before: N101AW Cleared, N102AW Cleared, N103AW Grounded, N104AW Grounded,"
+        " N105AW Cleared, N106AW Cleared."
+        " N103AW: #3 Closed, #4 Open. N999ZZ: None."
+        " A model wrote this answer from the records. The board below is the record."
+    )
+    assert "&lt;q&gt;Which can fly?&lt;/q&gt;" in page.text
+    assert 'name="question" size="60" value="Which can fly?"' in page.text
+    assert _part(page, "summary", "</p>").endswith("2 of 6 aircraft cleared to fly.")
+
+
+@pytest.mark.parametrize("posted", [{"question": "  "}, {}])
+def test_a_blank_or_missing_question_is_refused(
+    asking: TestClient, posted: dict[str, str]
+) -> None:
+    page = asking.post("/questions", data=posted)
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == "question: String should have at least 1 character"
+    assert 'id="answer"' not in page.text
+    assert 'name="question" size="60" value=""' in page.text
+
+
+def test_a_question_the_model_did_not_answer_keeps_what_was_asked(
+    store: Store,
+) -> None:
+    app = create_app(store, _now, asker=_no_answer)
+
+    page = TestClient(app).post("/questions", data={"question": "Which can fly?"})
+
+    assert page.status_code == HTTPStatus.BAD_GATEWAY
+    assert _problem(page) == "nothing to say about Which can fly?"
+    assert 'name="question" size="60" value="Which can fly?"' in page.text
+    assert 'id="answer"' not in page.text
+
+
+def test_an_app_with_no_asker_neither_offers_nor_serves_a_question(
+    client: TestClient, asking: TestClient
+) -> None:
+    box = '<form method="post" action="/questions">'
+    asked = {"question": "Which can fly?"}
+
+    assert box in asking.get("/").text
+    assert 'class="problem"' not in asking.get("/").text
+    assert box not in client.get("/").text
+    assert client.post("/questions", data=asked).status_code == HTTPStatus.NOT_FOUND
+
+
+def test_a_past_view_of_the_board_has_no_question_box(asking: TestClient) -> None:
+    past = asking.get("/", params={"at": TWO_DAYS_EARLIER})
+
+    assert 'action="/questions"' not in past.text

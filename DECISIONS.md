@@ -52,7 +52,7 @@ error.
 
 ## 2. What I built
 
-A server-rendered web app (FastAPI and Jinja2 over SQLite) in six pull requests, each with its checks and mutation testing green in CI before it merged:
+A server-rendered web app (FastAPI and Jinja2 over SQLite) in seven pull requests, each with its checks and mutation testing green in CI before it merged:
 
 | PR | What it added |
 |---|---|
@@ -62,6 +62,7 @@ A server-rendered web app (FastAPI and Jinja2 over SQLite) in six pull requests,
 | #6 | `web.py` and the pages: the board, each aircraft's page with its history and actions, and both as they stood at any past moment. |
 | #7 | `triage.py`: an optional severity suggestion from a model, recorded beside the severity the person picked. |
 | #9 | A stylesheet for the pages: status as badges, a write-up's history as a timeline, light and dark. No script and no build step. |
+| #10 | `ops.py`: a question box on the board, answered by a model through three tools that only read. |
 
 Three choices carry most of the weight:
 
@@ -84,10 +85,6 @@ event), an assignee for a repair, merging duplicate reports, a JSON API, Postgre
 
 Cut during the build, for time:
 
-- **Questions about the fleet in plain language** (the plan's rank 7, the one
-  tool-using agent). The web PR took three review rounds, and I spent the time on the
-  structural fix they pointed at in place of this feature. Call 18 in section 1
-  describes what it would have been.
 - **A labeled set to measure the severity suggestions** (rank 10). So nothing here says
   how often the suggestion agrees with a mechanic. The feature is built and tested
   against stand-in models only.
@@ -114,6 +111,14 @@ Known limits in what was built:
   description's length or the model call's time, and each click is a paid call. A
   write-up's description is text anyone can file and the model reads it, so a
   description can try to steer the suggestion; the person still picks.
+- **Fleet questions.** This was built last, in the final half hour (see section 5),
+  and its answers are not measured: tests script the model, so they show that a
+  question and each tool's reads reach it and that its answer reaches the page, not
+  that a real answer is right. A write-up's description is text anyone can file and
+  the model reads it, so a description can mislead an answer. It can't change data,
+  since no tool writes, and the answer is marked as a model's. Nothing bounds a
+  question's length or the time an answer takes, and each question is paid model
+  calls. A question about the past is answered by recording time, as call 1 says.
 - **Rough edges at the form boundary**: a repeated field or an uploaded file is
   refused on the aircraft's page in the validation library's words, not this app's,
   and a field over 1 MiB gets a bare 400 from the framework.
@@ -125,9 +130,8 @@ Known limits in what was built:
 1. A grounding history per aircraft ("grounded from Tuesday 09:00 to Wednesday
    14:00"). The log already holds it.
 2. The withdrawal event.
-3. A labeled set for the severity suggestions, then the fleet-questions agent with a
-   set of questions whose answers are known, since nothing would otherwise measure
-   either.
+3. A labeled set for the severity suggestions and a set of fleet questions whose
+   answers are known, since nothing measures either.
 4. Keeping a refused form's values.
 5. Sign-in, so a name in the history is an identity, and with it inspector sign-off and
    deferral limits.
@@ -156,6 +160,8 @@ tests and these documents in one session, whose log is submitted with this. What
 - With about half an hour left I asked for a better-looking frontend. The pages
   already existed, so the agent restyled them (#9) and checked the result from
   headless-browser screenshots in both color schemes.
+- With these documents merged and about twenty-five minutes left, I asked for the
+  fleet questions after all (#10). It had one review round like the rest.
 
 What the reviews changed, since that is where the agent's first drafts were wrong:
 
@@ -164,16 +170,22 @@ What the reviews changed, since that is where the agent's first drafts were wron
   rules copied into the templates. The agent's fix for the copies left new copies, and
   the second round found them. At that point it stopped patching and moved every such
   decision out of the templates into typed code; a third check found one more, fixed
-  the same way. That cost the fleet-questions feature.
+  the same way. That cost the fleet-questions feature its place in the plan's order.
 - The suggestion PR (#7): both reviews found that the form's carried suggestion was
   trusted whole, so a suggestion could be recorded against a description the model
   never saw. The app now seals each suggestion to its description.
+- The fleet-questions PR (#10): the review found that what the tools returned never
+  named a status or a state, so a cleared aircraft reached the model as an empty
+  record. Each now carries its name. One design finding was left for time: the web
+  layer works out each write-up's state and each aircraft's status for the tools,
+  where the tools could do it from the store's own values.
 
 - These documents: a separate run checked the README's walk-through and sections 2
   to 4 here against the running app. It found the walk-through's past view leaving
   out a grounded aircraft and two limits described loosely; all three are corrected.
 
 What I would not claim: that the agent's output was right the first time, or that the
-suggestion feature has been measured. The reviews above are other runs of the same
+suggestion feature or the fleet questions have been measured. The reviews above are other runs of the same
 model family, not an independent person's review. The key for the model is in a local
-`.env` the agent was told never to read; no test calls the real model.
+`.env` the agent was told never to read; no test calls the real model, and the agent
+never did. Tests of both features run against scripted stand-ins for the model.
