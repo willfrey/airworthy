@@ -10,15 +10,16 @@ rule, `apply`:
 | `Resolved`     | resolved                       | refused                     |
 | `Reopened`     | refused                        | open, with no repair date   |
 
-Nothing here stores a state: `state_at` folds the log to the state at a moment.
+Nothing here stores a state: `latest` folds a log to its state, and `known_at` cuts a
+log to what was known at a moment.
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, assert_never
 
-from pydantic import AwareDatetime, StringConstraints
+from pydantic import AwareDatetime, Field, StringConstraints
 
 from airworthy.model import Model
 
@@ -96,8 +97,10 @@ class Reopened(Event):
     reason: Text
 
 
-type FollowUp = Reclassified | Scheduled | Resolved | Reopened
-"""An event on a write-up that its report already opened."""
+type FollowUp = Annotated[
+    Reclassified | Scheduled | Resolved | Reopened, Field(discriminator="kind")
+]
+"""An event on a write-up that its report already opened, told apart by `kind`."""
 
 
 class WriteUp(Model):
@@ -216,24 +219,35 @@ def _on_closed(state: Closed, event: FollowUp) -> State:
             assert_never(unreachable)
 
 
-def state_at(write_up: WriteUp, t: datetime) -> State | None:
-    """Fold a write-up's log to its state at `t`.
+def known_at(write_up: WriteUp, t: datetime) -> WriteUp | None:
+    """Give a write-up as it was known at `t`: its log, cut off after that moment.
 
     Args:
-        write_up: The log to fold.
+        write_up: The whole log.
         t: The moment to read, which must carry a time zone.
 
     Returns:
-        The state after every event dated at or before `t`, applied in log order, or
-        `None` when `t` is before the report. A log holding a follow-up that `apply`
-        refuses fails with that refusal; no log written through `apply` holds one.
+        The write-up with only the follow-ups dated at or before `t`, in log order, or
+        `None` when `t` is before the report. The whole log is checked whatever `t`
+        is: one holding a follow-up that `apply` refuses fails with that refusal at
+        every moment read, and no log written through `apply` holds one.
     """
+    _ = latest(write_up)
     if t < write_up.reported.at:
         return None
+    return WriteUp(
+        id=write_up.id,
+        tail=write_up.tail,
+        reported=write_up.reported,
+        later=tuple(event for event in write_up.later if event.at <= t),
+    )
+
+
+def latest(write_up: WriteUp) -> State:
+    """Fold a write-up's whole log to its state after the last event."""
     state: State = opened(write_up.reported)
     for event in write_up.later:
-        if event.at <= t:
-            state = apply(state, event)
+        state = apply(state, event)
     return state
 
 
@@ -242,10 +256,17 @@ def needs_scheduling(state: State) -> bool:
     return isinstance(state, Open) and state.scheduled_for is None
 
 
-def overdue(state: State, today: date) -> bool:
-    """Tell whether a write-up is open with a repair date before `today`."""
+def overdue(state: State, moment: datetime) -> bool:
+    """Tell whether a write-up is open with a repair date before `moment`'s UTC day."""
     return (
         isinstance(state, Open)
         and state.scheduled_for is not None
-        and state.scheduled_for < today
+        and state.scheduled_for < utc_day(moment)
     )
+
+
+def utc_day(moment: datetime) -> date:
+    """Give the UTC calendar day a moment falls on, the day a repair date is read by."""
+    # The one mutant here swaps UTC for None, the machine's own zone: the same call
+    # wherever that zone is UTC, as it is on CI.
+    return moment.astimezone(UTC).date()  # pragma: no mutate — None is UTC on CI

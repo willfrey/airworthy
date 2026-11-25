@@ -1,6 +1,6 @@
 """A write-up's log folds to one state by the transition table, or is refused."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -18,10 +18,11 @@ from airworthy.writeup import (
     Severity,
     WriteUp,
     apply,
+    known_at,
+    latest,
     needs_scheduling,
     opened,
     overdue,
-    state_at,
 )
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ def _reported(severity: Severity, minutes: int = 0) -> Reported:
 
 def _reclassified(severity: Severity, minutes: int) -> Reclassified:
     return Reclassified(
-        at=_at(minutes), by="Sam Okafor", severity=severity, reason="Measured the crack"
+        at=_at(minutes), by="Lin Zhou", severity=severity, reason="Measured the crack"
     )
 
 
@@ -77,6 +78,13 @@ def _closed(severity: Severity, resolved_at: int, as_of: int) -> Closed:
         note="Replaced the pane",
         as_of=_at(as_of),
     )
+
+
+def _state_at(log: WriteUp, minutes: int) -> Open | Closed | None:
+    known = known_at(log, _at(minutes))
+    if known is None:
+        return None
+    return latest(known)
 
 
 def _refusal(state: Open | Closed, event: FollowUp) -> str:
@@ -182,37 +190,45 @@ def test_an_event_dated_at_the_same_instant_as_the_last_one_is_applied() -> None
 def test_a_write_up_has_no_state_before_its_report() -> None:
     log = _log(_reported(Severity.HIGH, minutes=10))
 
-    assert state_at(log, _at(9)) is None
+    assert _state_at(log, 9) is None
 
 
 def test_a_write_up_is_open_at_the_instant_of_its_report() -> None:
     log = _log(_reported(Severity.HIGH, minutes=10))
 
-    assert state_at(log, _at(10)) == _open(Severity.HIGH, None, 10)
+    assert _state_at(log, 10) == _open(Severity.HIGH, None, 10)
+
+
+def test_a_write_up_known_at_a_moment_holds_only_the_events_dated_by_then() -> None:
+    scheduled = _scheduled(REPAIR_DAY, 5)
+    log = _log(_reported(Severity.HIGH), scheduled, _resolved(10))
+
+    assert known_at(log, _at(9)) == _log(_reported(Severity.HIGH), scheduled)
+    assert known_at(log, _at(10)) == log
 
 
 def test_a_follow_up_dated_exactly_at_the_moment_read_is_applied() -> None:
     log = _log(_reported(Severity.HIGH), _resolved(10))
 
-    assert state_at(log, _at(10)) == _closed(Severity.HIGH, resolved_at=10, as_of=10)
+    assert _state_at(log, 10) == _closed(Severity.HIGH, resolved_at=10, as_of=10)
 
 
 def test_a_follow_up_dated_after_the_moment_read_is_not_applied() -> None:
     log = _log(_reported(Severity.HIGH), _scheduled(REPAIR_DAY, 5), _resolved(10))
 
-    assert state_at(log, _at(9)) == _open(Severity.HIGH, REPAIR_DAY, 5)
+    assert _state_at(log, 9) == _open(Severity.HIGH, REPAIR_DAY, 5)
 
 
-def test_raising_a_medium_to_high_makes_it_ground() -> None:
+def test_raising_a_medium_to_high_leaves_it_open_and_high() -> None:
     log = _log(_reported(Severity.MEDIUM), _reclassified(Severity.HIGH, 10))
 
-    assert state_at(log, _at(10)) == _open(Severity.HIGH, None, 10)
+    assert _state_at(log, 10) == _open(Severity.HIGH, None, 10)
 
 
-def test_lowering_a_high_stops_it_grounding_while_it_stays_open() -> None:
+def test_lowering_a_high_leaves_it_open_at_the_lower_severity() -> None:
     log = _log(_reported(Severity.HIGH), _reclassified(Severity.MEDIUM, 10))
 
-    assert state_at(log, _at(10)) == _open(Severity.MEDIUM, None, 10)
+    assert _state_at(log, 10) == _open(Severity.MEDIUM, None, 10)
 
 
 def test_a_reopened_high_is_open_and_high_again() -> None:
@@ -223,13 +239,13 @@ def test_a_reopened_high_is_open_and_high_again() -> None:
         _reopened(15),
     )
 
-    assert state_at(log, _at(15)) == _open(Severity.HIGH, None, 15)
+    assert _state_at(log, 15) == _open(Severity.HIGH, None, 15)
 
 
 def test_a_write_up_can_be_resolved_without_ever_being_scheduled() -> None:
     log = _log(_reported(Severity.LOW), _resolved(10))
 
-    assert state_at(log, _at(20)) == _closed(Severity.LOW, resolved_at=10, as_of=10)
+    assert _state_at(log, 20) == _closed(Severity.LOW, resolved_at=10, as_of=10)
 
 
 def test_a_severity_corrected_while_resolved_is_the_severity_it_reopens_at() -> None:
@@ -240,20 +256,24 @@ def test_a_severity_corrected_while_resolved_is_the_severity_it_reopens_at() -> 
         _reopened(20),
     )
 
-    assert state_at(log, _at(20)) == _open(Severity.HIGH, None, 20)
+    assert _state_at(log, 20) == _open(Severity.HIGH, None, 20)
 
 
 def test_events_at_one_instant_apply_in_log_order() -> None:
     log = _log(_reported(Severity.HIGH), _scheduled(REPAIR_DAY, 10), _resolved(10))
 
-    assert state_at(log, _at(10)) == _closed(Severity.HIGH, resolved_at=10, as_of=10)
+    assert _state_at(log, 10) == _closed(Severity.HIGH, resolved_at=10, as_of=10)
 
 
-def test_a_log_holding_a_refused_follow_up_fails_when_it_is_read() -> None:
+@pytest.mark.parametrize("minutes", [-1, 5, 10, 20])
+def test_a_log_holding_a_refused_follow_up_fails_at_every_moment_read(
+    minutes: int,
+) -> None:
+    """Before the report, before the refused follow-up, at it and after it."""
     log = _log(_reported(Severity.HIGH), _resolved(10), _scheduled(REPAIR_DAY, 10))
 
     with pytest.raises(RefusedError):
-        _ = state_at(log, _at(10))
+        _ = known_at(log, _at(minutes))
 
 
 # Facts about one state.
@@ -272,27 +292,31 @@ def test_a_resolved_write_up_does_not_need_scheduling() -> None:
 
 
 @pytest.mark.parametrize(
-    ("today", "is_overdue"),
+    ("moment", "is_overdue"),
     [
-        (date(2026, 1, 11), False),
-        (date(2026, 1, 12), False),
-        (date(2026, 1, 13), True),
+        (datetime(2026, 1, 11, 12, 0, tzinfo=UTC), False),
+        (datetime(2026, 1, 12, 23, 59, tzinfo=UTC), False),
+        (datetime(2026, 1, 13, 0, 0, tzinfo=UTC), True),
+        # Still the repair day in New York, already the next day in UTC.
+        (datetime(2026, 1, 12, 20, 0, tzinfo=timezone(timedelta(hours=-5))), True),
+        # Already the next day in Tokyo, still the repair day in UTC.
+        (datetime(2026, 1, 13, 8, 0, tzinfo=timezone(timedelta(hours=9))), False),
     ],
 )
-def test_an_open_write_up_is_overdue_only_after_its_repair_date(
-    today: date, *, is_overdue: bool
+def test_an_open_write_up_is_overdue_once_its_repair_date_is_past_in_utc(
+    moment: datetime, *, is_overdue: bool
 ) -> None:
-    assert overdue(_open(Severity.LOW, REPAIR_DAY, 0), today) is is_overdue
+    assert overdue(_open(Severity.LOW, REPAIR_DAY, 0), moment) is is_overdue
 
 
 def test_an_unscheduled_write_up_is_not_overdue() -> None:
-    assert not overdue(_open(Severity.LOW, None, 0), date(2026, 1, 13))
+    assert not overdue(_open(Severity.LOW, None, 0), _at(60 * 24 * 30))
 
 
 def test_a_resolved_write_up_is_not_overdue() -> None:
     state = _closed(Severity.LOW, resolved_at=0, as_of=0)
 
-    assert not overdue(state, date(2026, 1, 13))
+    assert not overdue(state, _at(60 * 24 * 30))
 
 
 # What an event may hold.
