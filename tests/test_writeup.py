@@ -157,11 +157,11 @@ def test_resolving_a_resolved_write_up_is_refused() -> None:
 
 
 def test_reopening_a_resolved_write_up_opens_it_with_no_repair_date() -> None:
-    state = _closed(Severity.HIGH, resolved_at=5, as_of=5)
+    state = _closed(Severity.MEDIUM, resolved_at=5, as_of=5)
 
     moved = apply(state, _reopened(10))
 
-    assert moved == _open(Severity.HIGH, None, 10)
+    assert moved == _open(Severity.MEDIUM, None, 10)
 
 
 def test_an_event_dated_before_the_last_one_is_refused() -> None:
