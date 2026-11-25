@@ -790,3 +790,15 @@ def test_main_offers_suggestions_only_with_a_key_for_the_model(
     [(app, _)] = served
     page = TestClient(app).get("/aircraft/N101AW")
     assert ("Suggest a severity" in page.text) is offered
+
+
+def test_the_board_marks_the_overdue_column_only_where_a_repair_is_overdue(
+    client: TestClient,
+) -> None:
+    """N103AW's #4 is past its repair date; N101AW has nothing open."""
+    board = client.get("/").text
+    late = board[board.index('<tr id="N103AW"') :].split("</tr>")[0]
+    quiet = board[board.index('<tr id="N101AW"') :].split("</tr>")[0]
+
+    assert '<td class="overdue">#4 </td>' in late
+    assert '<td class="">none</td>' in quiet

@@ -32,7 +32,7 @@
   </td>
   <td>{{ row.open }} open</td>
   <td>{% for id in row.waiting %}#{{ id }} {% else %}none{% endfor %}</td>
-  <td class="overdue">{% for id in row.overdue %}#{{ id }} {% else %}none{% endfor %}</td>
+  <td class="{{ "overdue" if row.overdue else "" }}">{% for id in row.overdue %}#{{ id }} {% else %}none{% endfor %}</td>
 </tr>
 {% endfor %}
 </tbody>
