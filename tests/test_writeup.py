@@ -322,6 +322,22 @@ def test_a_resolved_write_up_is_not_overdue() -> None:
 # What an event may hold.
 
 
+def test_a_follow_up_with_one_bad_field_reports_that_field_once() -> None:
+    """A log's follow-ups are told apart by `kind`, not tried one after another."""
+    log: dict[str, object] = {
+        "id": 1,
+        "tail": "N101AW",
+        "reported": _reported(Severity.LOW),
+        "later": [{"kind": "scheduled", "at": T0, "by": "Dee Park", "on": "someday"}],
+    }
+
+    with pytest.raises(ValidationError, match="valid date") as invalid:
+        _ = WriteUp.model_validate(log)
+
+    places = [error["loc"] for error in invalid.value.errors()]
+    assert places == [("later", 0, "scheduled", "on")]
+
+
 def test_an_event_strips_its_text() -> None:
     resolved = Resolved(at=T0, by="  Sam Okafor ", note=" Replaced the pane\n")
 
