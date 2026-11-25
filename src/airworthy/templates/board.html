@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Fleet board{% endblock %}
+{% block main %}
+{% set query = ("?at=" ~ at|urlencode) if at else "" %}
+<h1>Fleet board</h1>
+<form method="get" action="/">
+  <label>Show the fleet as it stood at (UTC)
+    <input type="datetime-local" name="at" value="{{ at }}">
+  </label>
+  <button>Show</button>
+  {% if at %}<a href="/">Back to now</a>{% endif %}
+</form>
+<p id="summary">{{ "As it stood at" if at else "Now," }} {{ stamp(moment) }}:
+  {{ rows|rejectattr("grounding")|list|length }} of {{ rows|length }} aircraft cleared to fly.</p>
+<table>
+<thead>
+<tr><th>Aircraft</th><th>Type</th><th>Status</th><th>Open write-ups</th><th>Needs a repair date</th><th>Overdue</th></tr>
+</thead>
+<tbody>
+{% for row in rows %}
+<tr id="{{ row.aircraft.tail }}" class="{{ "grounded" if row.grounding else "cleared" }}">
+  <td><a href="/aircraft/{{ row.aircraft.tail }}{{ query }}">{{ row.aircraft.tail }}</a></td>
+  <td>{{ row.aircraft.type }}</td>
+  <td class="state">
+    {% if row.grounding %}
+    <strong>Grounded</strong> by
+    {% for write_up in row.grounding %}#{{ write_up.id }} {{ write_up.reported.description }}{{ "" if loop.last else ";" }}
+    {% endfor %}
+    {% else %}
+    Cleared to fly
+    {% endif %}
+  </td>
+  <td>{{ row.open }} open</td>
+  <td>{% for id in row.waiting %}#{{ id }} {% else %}none{% endfor %}</td>
+  <td class="overdue">{% for id in row.overdue %}#{{ id }} {% else %}none{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

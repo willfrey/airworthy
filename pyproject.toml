@@ -8,7 +8,16 @@ authors = [{ name = "Will Frey", email = "jfrey89@gmail.com" }]
 # published by mistake.
 classifiers = ["Private :: Do Not Upload"]
 requires-python = ">=3.15"
-dependencies = ["pydantic>=2.14"]
+dependencies = [
+    "fastapi>=0.165.0",
+    "jinja2>=3.1.6",
+    "pydantic>=2.14",
+    "python-multipart>=0.0.34",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+airworthy = "airworthy.web:main"
 
 # The version comes from git tags: HEAD tagged `v1.2.0` builds 1.2.0, and any other
 # commit builds a development version past the last tag (1.2.1.dev3+g…).
@@ -17,6 +26,10 @@ dependencies = ["pydantic>=2.14"]
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# FastAPI imports python-multipart to read a posted form; no module of ours does.
+[tool.deptry.per_rule_ignores]
+DEP002 = ["python-multipart"]
 
 [tool.hatch.version]
 source = "vcs"
@@ -53,6 +66,7 @@ required-version = ">=0.12.3"
 dev = [
     "complexipy",
     "deptry",
+    "httpx2>=2.16.2",
     "hypothesis",
     "import-linter",
     "mutmut",
@@ -346,7 +360,7 @@ exclude_type_checking_imports = true
 name = "layers"
 type = "layers"
 containers = ["airworthy"]
-layers = ["seed", "store", "fleet", "writeup", "(model)"]
+layers = ["web", "seed", "store", "fleet", "writeup", "(model)"]
 exhaustive = true
 
 # --- mutation testing -------------------------------------------------------------

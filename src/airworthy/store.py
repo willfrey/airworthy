@@ -11,7 +11,7 @@ checked one after the other, the second against what the first recorded.
 
 import json
 import sqlite3
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, suppress
 from typing import TYPE_CHECKING, Final, Self, cast
 
 from airworthy.fleet import Aircraft
@@ -190,7 +190,11 @@ def _no_aircraft(tail: str) -> str:
 
 
 def _one(connection: sqlite3.Connection, write_up_id: int) -> WriteUp:
-    match _logs(connection, write_up_id=write_up_id):
+    found: list[WriteUp] = []
+    # SQLite can't hold an id past 64 bits, so no write-up has one.
+    with suppress(OverflowError):
+        found = _logs(connection, write_up_id=write_up_id)
+    match found:
         case [write_up]:
             return write_up
         case _:

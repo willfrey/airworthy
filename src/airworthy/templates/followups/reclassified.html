@@ -1,0 +1,12 @@
+<form class="action" method="post" action="/write-ups/{{ entry.write_up.id }}/events">
+  <input type="hidden" name="kind" value="reclassified">
+  <label>Severity
+    <select name="severity" required>
+      <option value="" selected disabled>choose</option>
+      <option>high</option><option>medium</option><option>low</option>
+    </select>
+  </label>
+  <label>Reason for the change <input name="reason" required></label>
+  <label>Your name <input name="by" required></label>
+  <button>Change the severity</button>
+</form>

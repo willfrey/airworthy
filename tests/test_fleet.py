@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 from hypothesis import given, strategies as st
+from pydantic import ValidationError
 
-from airworthy.fleet import Cleared, Grounded, status_at
+from airworthy.fleet import Aircraft, Cleared, Grounded, status_at
 from airworthy.writeup import (
     Closed,
     Open,
@@ -232,3 +233,12 @@ def test_events_after_a_moment_never_change_the_status_at_it(
     known_then = [_cut_by_hand(w, t) for w in write_ups if w.reported.at <= t]
 
     assert status_at(write_ups, t) == status_at(known_then, t)
+
+
+@pytest.mark.parametrize("tail", ["", "A B", "N1/2", "N1?", "n101aw", "N1\n"])
+def test_a_tail_number_is_capitals_digits_and_hyphens(tail: str) -> None:
+    """A tail goes into a page's links as it is, so it holds nothing a URL reads."""
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        _ = Aircraft(tail=tail, type="Airbus A320")
+
+    assert Aircraft(tail="N1-2A", type="Airbus A320").tail == "N1-2A"

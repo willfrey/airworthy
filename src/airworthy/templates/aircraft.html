@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ row.aircraft.tail }}{% endblock %}
+{% block main %}
+{% set tail = row.aircraft.tail %}
+<h1>{{ tail }} <small>{{ row.aircraft.type }}</small></h1>
+{% if at %}
+<p>As it stood at {{ stamp(moment) }}. Nothing can be changed in a past view.
+  <a href="/aircraft/{{ tail }}">Back to now</a></p>
+{% endif %}
+<p id="status" class="status {{ "grounded" if row.grounding else "cleared" }}">
+  {% if row.grounding %}
+  Grounded by {% for write_up in row.grounding %}#{{ write_up.id }}{{ "" if loop.last else ", " }}{% endfor %}
+  {% else %}
+  Cleared to fly
+  {% endif %}
+</p>
+{% if problem %}<p class="problem" role="alert">{{ problem }}</p>{% endif %}
+
+{% for entry in row.entries %}
+{% set write_up = entry.write_up %}
+{% set state = entry.state %}
+<article id="write-up-{{ write_up.id }}">
+  <h2>#{{ write_up.id }} {{ write_up.reported.description }}</h2>
+  <p class="standing{{ " overdue" if entry.stands.urgent else "" }}">{{ state.severity }} severity, {{ entry.stands.text }}</p>
+  <ol class="history">
+    <li>{{ stamp(write_up.reported.at) }} {{ write_up.reported.by }} reported it as {{ write_up.reported.severity }}</li>
+    {% for event in write_up.later %}
+    <li>{{ stamp(event.at) }} {{ event.by }} {{ told(event) }}</li>
+    {% endfor %}
+  </ol>
+  {% if not at %}
+  {# One form for each follow-up the state allows: a kind with no form of its own fails here. #}
+  {% for kind in entry.offers %}
+  {% include "followups/" ~ kind ~ ".html" %}
+  {% endfor %}
+  {% endif %}
+</article>
+{% else %}
+<p>No write-ups{{ " by then" if at else "" }}.</p>
+{% endfor %}
+
+{% if not at %}
+<form method="post" action="/aircraft/{{ tail }}/write-ups">
+  <fieldset>
+    <legend>File a write-up</legend>
+    <p><label>What is wrong <textarea name="description" rows="2" cols="60" required></textarea></label></p>
+    <p>Severity (a high one grounds the aircraft until it is resolved):
+      <label><input type="radio" name="severity" value="high" required> high</label>
+      <label><input type="radio" name="severity" value="medium"> medium</label>
+      <label><input type="radio" name="severity" value="low"> low</label>
+    </p>
+    <p><label>Your name <input name="by" required></label></p>
+    <button>File the write-up</button>
+  </fieldset>
+</form>
+{% endif %}
+{% endblock %}

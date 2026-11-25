@@ -6,7 +6,9 @@ stored nowhere.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
+
+from pydantic import StringConstraints
 
 from airworthy.model import Model
 from airworthy.writeup import Open, known_at, latest
@@ -21,7 +23,8 @@ if TYPE_CHECKING:
 class Aircraft(Model):
     """One aircraft in the fleet, known by its tail number."""
 
-    tail: str
+    tail: Annotated[str, StringConstraints(pattern=r"^[A-Z0-9-]+$")]
+    """Capitals, digits and hyphens only, so a tail is safe as a piece of a URL."""
     type: str
 
 
