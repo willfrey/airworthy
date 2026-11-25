@@ -32,6 +32,41 @@ Without a key the button is absent and everything else works the same. The sampl
 fleet's N105AW carries a recorded suggestion, so the marking is visible either way.
 Each suggestion is one model call of a few hundred tokens.
 
+## A walk through the sample fleet
+
+The board at `/` is the answer to "which aircraft can fly right now". On a fresh start
+it shows two of six aircraft cleared, and one story per aircraft:
+
+| Aircraft | What the board shows | Why |
+|---|---|---|
+| N101AW | cleared | its one write-up, a low, was resolved last week |
+| N102AW | grounded | a high reported three hours ago, repair set for tomorrow |
+| N103AW | cleared, one overdue | its high was resolved yesterday; a medium is past its repair date |
+| N104AW | grounded by two | two highs open, one with no repair date |
+| N105AW | grounded | a medium raised to high yesterday; its report was filed below what a model suggested, and the history says so |
+| N106AW | grounded | a high resolved and then reopened today, so it has no repair date again |
+
+Things to try:
+
+1. **Ground and release.** Open N104AW and resolve one of its two highs: the aircraft
+   stays grounded by the other. Resolve that one too and it is cleared.
+2. **Every issue gets a date.** The board's "Needs a repair date" column lists the open
+   write-ups nobody has scheduled. Set a date in the past and the write-up moves to
+   "Overdue".
+3. **A past moment.** Enter a time two days back in "Show the fleet as it stood at
+   (UTC)". N103AW is grounded, N102AW, N105AW and N106AW are cleared, and the pages
+   offer no actions: a past view can't be changed. The same view is a link: `/?at=`
+   followed by a time such as `2026-11-23T12:00`.
+4. **Corrections are events.** On N106AW, one write-up was reported high and lowered to
+   medium with a reason, which is the one way an aircraft is released without a
+   repair. Change a severity yourself: the form refuses without a reason.
+5. **An action the state doesn't allow.** A page offers only the actions a write-up's
+   state allows. Open one write-up in two tabs, resolve it in the first, then resolve
+   it in the second: the second is refused and nothing is recorded twice.
+
+Any non-blank name is accepted in "Your name": there is no sign-in, which
+`DECISIONS.md` discusses with everything else that was left out.
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/).
