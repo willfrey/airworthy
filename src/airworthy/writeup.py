@@ -19,8 +19,8 @@ from datetime import UTC, date
 from enum import StrEnum
 from typing import Annotated, Literal, assert_never
 
-# A schema is built from `Open` and `Closed` (`airworthy.ops` returns them from a
-# tool), which reads their annotations, so this name must exist at run time.
+# Building a schema from `Open` or `Closed` reads its annotations at run time, so
+# this name must exist then.
 lazy from datetime import datetime
 
 from pydantic import AwareDatetime, Field, StringConstraints
@@ -178,6 +178,8 @@ class Open:
     scheduled_for: date | None
     as_of: datetime
     """When the last event applied happened."""
+    kind: Literal["open"] = "open"
+    """Names the state where it is written out, as an event's `kind` names the event."""
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -190,6 +192,8 @@ class Closed:
     note: str
     as_of: datetime
     """When the last event applied happened: past `at` after a later correction."""
+    kind: Literal["resolved"] = "resolved"
+    """Names the state where it is written out."""
 
 
 type State = Open | Closed

@@ -318,7 +318,7 @@ class Pages:
         return tuple(
             ops.Listed(
                 aircraft=aircraft,
-                status=status_at(_known(self.store, aircraft.tail, moment), moment),
+                status=status_at(self.store.write_ups(aircraft.tail), moment),
             )
             for aircraft in fleet
         )
@@ -515,13 +515,9 @@ def _moment(at: str, now: datetime) -> datetime:
         raise NotATimeError(msg) from error
 
 
-def _known(store: Store, tail: str, moment: datetime) -> list[WriteUp]:
-    logs = (known_at(log, moment) for log in store.write_ups(tail))
-    return [log for log in logs if log is not None]
-
-
 def _row(store: Store, aircraft: Aircraft, moment: datetime) -> Row:
-    known = _known(store, aircraft.tail, moment)
+    logs = (known_at(log, moment) for log in store.write_ups(aircraft.tail))
+    known = [log for log in logs if log is not None]
     return Row(
         aircraft=aircraft,
         grounding=_grounding(status_at(known, moment)),

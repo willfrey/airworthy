@@ -6,15 +6,15 @@ stored nowhere.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import StringConstraints
 
 from airworthy.model import Model
 from airworthy.writeup import Open, known_at, latest
 
-# A schema is built from `Grounded` (`airworthy.ops` returns it from a tool), which
-# reads its annotations, so this name must exist at run time.
+# Building a schema from `Grounded` reads its annotations at run time, so this name
+# must exist then.
 lazy from airworthy.writeup import WriteUp
 
 if TYPE_CHECKING:
@@ -34,6 +34,9 @@ class Aircraft(Model):
 class Cleared:
     """An aircraft that no open write-up grounds."""
 
+    kind: Literal["cleared"] = "cleared"
+    """Names the status where it is written out: without it this is an empty record."""
+
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class Grounded:
@@ -45,6 +48,8 @@ class Grounded:
     Each is the write-up as it was known at the moment asked about, so a past answer
     holds nothing recorded later.
     """
+    kind: Literal["grounded"] = "grounded"
+    """Names the status where it is written out."""
 
 
 type Status = Cleared | Grounded

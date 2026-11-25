@@ -18,7 +18,8 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from airworthy import ops
-from airworthy.fleet import Aircraft, Cleared
+from airworthy.fleet import Aircraft, Cleared, Grounded
+from airworthy.writeup import Closed, Reported, Severity, WriteUp, opened
 
 if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
@@ -29,6 +30,16 @@ pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 3, 3, 7, 30, tzinfo=UTC)
 EARLIER = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+CRACK = WriteUp(
+    id=2,
+    tail="N102AW",
+    reported=Reported(
+        at=NOW, by="Ana Reyes", severity=Severity.HIGH, description="Cracked pane"
+    ),
+)
+REPAIRED = Closed(
+    severity=Severity.HIGH, at=NOW, by="Sam Okafor", note="Replaced the pane", as_of=NOW
+)
 CALLS = (
     ToolCallPart(tool_name="current_time", args={}),
     ToolCallPart(tool_name="fleet_status", args={"at": "2026-03-01T12:00:00Z"}),
@@ -51,12 +62,19 @@ class _Fleet:
 
     def fleet(self, at: datetime | None) -> tuple[ops.Listed, ...]:
         self.moments.append(at)
-        aircraft = Aircraft(tail="N101AW", type="Airbus A320")
-        return (ops.Listed(aircraft=aircraft, status=Cleared()),)
+        flying = Aircraft(tail="N101AW", type="Airbus A320")
+        held = Aircraft(tail="N102AW", type="Airbus A320")
+        return (
+            ops.Listed(aircraft=flying, status=Cleared()),
+            ops.Listed(aircraft=held, status=Grounded(by=(CRACK,))),
+        )
 
     def logs(self, tail: str) -> tuple[ops.Filed, ...] | None:
         self.tails.append(tail)
-        return None
+        return (
+            ops.Filed(write_up=CRACK, state=opened(CRACK.reported)),
+            ops.Filed(write_up=CRACK, state=REPAIRED),
+        )
 
 
 def _read_then_answer(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -67,7 +85,8 @@ def _read_then_answer(messages: list[ModelMessage], info: AgentInfo) -> ModelRes
         return ModelResponse(parts=[CALLS[len(returned)]])
     asked = [part.content for part in parts if isinstance(part, UserPromptPart)]
     told = [f"{part.tool_name}={type(part.content).__name__}" for part in returned]
-    text = f"{asked} {told} {info.instructions}"
+    read = " ".join(part.model_response_str() for part in returned)
+    text = f"{asked} {told} {info.instructions} READ {read}"
     return ModelResponse(parts=[TextPart(text)])
 
 
@@ -79,9 +98,17 @@ def test_an_answer_comes_from_the_question_and_what_each_tool_read() -> None:
 
     assert answer.startswith(
         "['Which aircraft can fly?'] ['current_time=datetime', 'fleet_status=tuple',"
-        " 'fleet_status=tuple', 'write_ups=NoneType'] You answer a question about a"
+        " 'fleet_status=tuple', 'write_ups=tuple'] You answer a question about a"
         " fleet of aircraft and their maintenance write-ups, using only what the tools"
         " return."
+    )
+    read = answer.split(" READ ")[1]
+    assert '"tail":"N101AW","type":"Airbus A320"},"status":{"kind":"cleared"}' in read
+    assert '"kind":"grounded"' in read
+    assert '"scheduled_for":null,"as_of":"2026-03-03T07:30:00Z","kind":"open"' in read
+    assert (
+        '"note":"Replaced the pane","as_of":"2026-03-03T07:30:00Z","kind":"resolved"'
+        in read
     )
     assert fleet.moments == [EARLIER, None]
     assert fleet.tails == ["N102AW"]
