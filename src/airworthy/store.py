@@ -27,15 +27,15 @@ type Connect = Callable[[], sqlite3.Connection]
 """Opens a new connection to the store's database."""
 
 SCHEMA: Final = """
-CREATE TABLE aircraft (
+CREATE TABLE IF NOT EXISTS aircraft (
     tail TEXT PRIMARY KEY,
     type TEXT NOT NULL
 ) STRICT;
-CREATE TABLE write_ups (
+CREATE TABLE IF NOT EXISTS write_ups (
     id INTEGER PRIMARY KEY,
     tail TEXT NOT NULL REFERENCES aircraft (tail)
 ) STRICT;
-CREATE TABLE events (
+CREATE TABLE IF NOT EXISTS events (
     seq INTEGER PRIMARY KEY,
     write_up_id INTEGER NOT NULL REFERENCES write_ups (id),
     body TEXT NOT NULL
@@ -47,7 +47,9 @@ FOREIGN_KEYS_ON: Final = "PRAGMA foreign_keys = ON"
 BEGIN_WRITE: Final = "BEGIN IMMEDIATE"
 COMMIT: Final = "COMMIT"
 INSERT_AIRCRAFT: Final = "INSERT INTO aircraft (tail, type) VALUES (?, ?)"
-SELECT_AIRCRAFT: Final = "SELECT tail, type FROM aircraft ORDER BY tail"
+SELECT_AIRCRAFT: Final = """
+SELECT tail, type FROM aircraft WHERE ?1 IS NULL OR tail = ?1 ORDER BY tail
+"""
 INSERT_WRITE_UP: Final = "INSERT INTO write_ups (tail) VALUES (?) RETURNING id"
 INSERT_EVENT: Final = "INSERT INTO events (write_up_id, body) VALUES (?, ?)"
 SELECT_LOGS: Final = """
@@ -66,27 +68,24 @@ class Store:
     """The fleet's aircraft and write-up logs in one SQLite database."""
 
     def __init__(self, connect: Connect) -> None:
-        """Keep the way to reach the database; nothing is opened until a call.
+        """Keep the way to reach the database, and make its tables if it has none.
 
         Args:
             connect: Opens a new connection. Each call of a method opens one and
                 closes it, since a connection can't leave the thread that opened it.
         """
         self._connect = connect
+        with self._connection() as connection:
+            _ = connection.executescript(SCHEMA)
 
     @classmethod
     def at(cls, path: Path) -> Self:
-        """Give a store whose database is the file at `path`, made on first use."""
+        """Give a store whose database is the file at `path`, made if it is missing."""
 
         def connect() -> sqlite3.Connection:
             return sqlite3.connect(path)
 
         return cls(connect)
-
-    def create(self) -> None:
-        """Create the tables, in a database that has none."""
-        with self._connection() as connection:
-            _ = connection.executescript(SCHEMA)
 
     def add_aircraft(self, aircraft: Aircraft) -> None:
         """Add an aircraft to the fleet."""
@@ -95,11 +94,15 @@ class Store:
 
     def all_aircraft(self) -> list[Aircraft]:
         """Give every aircraft in the fleet, in tail-number order."""
-        with self._connection() as connection:
-            rows = cast(
-                "list[tuple[str, str]]", connection.execute(SELECT_AIRCRAFT).fetchall()
-            )
-        return [Aircraft(tail=tail, type=kind) for tail, kind in rows]
+        return self._fleet(None)
+
+    def aircraft(self, tail: str) -> Aircraft:
+        """Give the aircraft with a tail number, or fail with `NotFoundError`."""
+        match self._fleet(tail):
+            case [aircraft]:
+                return aircraft
+            case _:
+                raise NotFoundError(_no_aircraft(tail))
 
     def file(self, tail: str, reported: Reported) -> int:
         """Open a write-up on an aircraft with its report.
@@ -121,8 +124,7 @@ class Store:
                     connection.execute(INSERT_WRITE_UP, (tail,)).fetchone(),
                 )
             except sqlite3.IntegrityError as error:
-                msg = f"no aircraft {tail}"
-                raise NotFoundError(msg) from error
+                raise NotFoundError(_no_aircraft(tail)) from error
             _ = connection.execute(INSERT_EVENT, (row[0], reported.model_dump_json()))
         return row[0]
 
@@ -132,36 +134,42 @@ class Store:
         The write-up's log is read and checked only once this call holds the
         database's write lock, so no other follow-up can land between the check and
         the record. A follow-up the write-up's state doesn't allow fails with the
-        refusal `apply` gives, and nothing is recorded.
+        refusal `apply` gives, and an id no write-up has with `NotFoundError`; either
+        way nothing is recorded.
 
         Args:
             write_up_id: The write-up to follow up.
             follow_up: The event to record.
-
-        Raises:
-            NotFoundError: When there is no write-up with that id.
         """
         with self._writing() as connection:
-            match _logs(connection, write_up_id=write_up_id):
-                case [write_up]:
-                    _ = apply(latest(write_up), follow_up)
-                case _:
-                    msg = f"no write-up {write_up_id}"
-                    raise NotFoundError(msg)
+            _ = apply(latest(_one(connection, write_up_id)), follow_up)
             body = follow_up.model_dump_json()
             _ = connection.execute(INSERT_EVENT, (write_up_id, body))
 
+    def write_up(self, write_up_id: int) -> WriteUp:
+        """Give the write-up with an id, or fail with `NotFoundError`."""
+        with self._connection() as connection:
+            return _one(connection, write_up_id)
+
     def write_ups(self, tail: str | None = None) -> list[WriteUp]:
-        """Give one aircraft's write-ups, or the whole fleet's, oldest first."""
+        """Give one aircraft's write-ups, or the whole fleet's, in the order filed."""
         with self._connection() as connection:
             return _logs(connection, tail=tail)
+
+    def _fleet(self, tail: str | None) -> list[Aircraft]:
+        with self._connection() as connection:
+            rows = cast(
+                "list[tuple[str, str]]",
+                connection.execute(SELECT_AIRCRAFT, (tail,)).fetchall(),
+            )
+        return [Aircraft(tail=found, type=kind) for found, kind in rows]
 
     @contextmanager
     def _connection(self) -> Generator[sqlite3.Connection]:
         """Open a connection for one operation, and close it after."""
         with closing(self._connect()) as connection:
-            # The module would otherwise open transactions of its own, and BEGIN_WRITE
-            # would fail inside one.
+            # A connection opened with autocommit off is already inside a transaction,
+            # where BEGIN_WRITE fails.
             connection.autocommit = True
             _ = connection.execute(FOREIGN_KEYS_ON)
             yield connection
@@ -175,6 +183,19 @@ class Store:
             # transaction open, and the connection closing rolls that back.
             yield connection  # ruff: ignore[fallible-context-manager] — as above
             _ = connection.execute(COMMIT)
+
+
+def _no_aircraft(tail: str) -> str:
+    return f"no aircraft {tail}"
+
+
+def _one(connection: sqlite3.Connection, write_up_id: int) -> WriteUp:
+    match _logs(connection, write_up_id=write_up_id):
+        case [write_up]:
+            return write_up
+        case _:
+            msg = f"no write-up {write_up_id}"
+            raise NotFoundError(msg)
 
 
 def _logs(

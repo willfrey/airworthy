@@ -1,6 +1,6 @@
 """The sample fleet loads with each aircraft's story intact, whenever it is loaded."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -15,16 +15,17 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-# Before 12:00 UTC, the time of day the seed's anchor has: the whole days between the
-# anchor and this moment are then one fewer than the days between their two dates.
-NOW: Final = datetime(2026, 3, 3, 7, 30, tzinfo=UTC)
+# 07:30 UTC on 3 March, told in a zone where it is still 2 March. Before 12:00 UTC, the
+# time of day the seed's anchor has, the whole days between the anchor and this moment
+# are one fewer than the days between their two UTC dates; and in this zone the local
+# date is not the UTC date, so a repair date moved by either is a day out.
+NOW: Final = datetime(2026, 3, 2, 23, 30, tzinfo=timezone(timedelta(hours=-8)))
 
 
 @pytest.fixture
 def store(tmp_path: Path) -> Store:
     """Give a store holding the sample fleet, loaded as of `NOW`."""
     made = Store.at(tmp_path / "fleet.db")
-    made.create()
     seed.load(made, NOW)
     return made
 

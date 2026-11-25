@@ -44,7 +44,7 @@ def load(store: Store, now: datetime) -> None:
     """Load the sample fleet into an empty store, its stories ending at `now`.
 
     Args:
-        store: A store with its tables created and nothing in them.
+        store: A store with nothing in it.
         now: The moment the stories are told from, which must carry a time zone.
     """
     seed = Seed.model_validate_json(files().joinpath(SEED_FILE).read_bytes())
