@@ -1,8 +1,7 @@
 # Decisions
 
-Sections 2–5 (what I built, what I left out, what comes next, and how I used AI) land
-with the last pull request. This section was settled before any application code was
-written.
+Section 1 was settled before any application code was written. Sections 2–5 were
+written at the end of the build.
 
 ## 1. Questions I would have asked the product manager, and my answers
 
@@ -50,3 +49,131 @@ and I accepted four changes:
 
 Call 19 was added in the same review; the plan had no answer for a write-up filed in
 error.
+
+## 2. What I built
+
+A server-rendered web app (FastAPI and Jinja2 over SQLite) in six pull requests, each with its checks and mutation testing green in CI before it merged:
+
+| PR | What it added |
+|---|---|
+| #3 | `writeup.py`: a write-up is an append-only log of events. One function, `apply`, moves a state by one event, by the table in the module's docstring; nothing stores a state. |
+| #4 | `fleet.py`: an aircraft is grounded exactly while it has an open high. Two properties over generated histories check that rule and that a later event never changes a past view. |
+| #5 | `store.py`: the events in SQLite, each action checked against the latest state inside one write transaction, so two people resolving at once record one resolution. The sample fleet is data (`seed.json`), loaded through the same rules as a person's actions. |
+| #6 | `web.py` and the pages: the board, each aircraft's page with its history and actions, and both as they stood at any past moment. |
+| #7 | `triage.py`: an optional severity suggestion from a model, recorded beside the severity the person picked. |
+| #9 | A stylesheet for the pages: status as badges, a write-up's history as a timeline, light and dark. No script and no build step. |
+
+Three choices carry most of the weight:
+
+- **The log is the only source.** "Grounded", "overdue", "needs a repair date" and the
+  past view are all computed from events. There is no status column to fall out of
+  step with the history, and the past view costs no extra storage.
+- **Rules live in one place each.** Which follow-ups a state allows is one table
+  (`refusal`); the page offers exactly the actions that table allows, and the store
+  refuses by the same table. What a page says about where a write-up stands is one
+  `match` that the type checker requires to cover every case.
+- **A person's choice grounds an aircraft, never a model's.** The suggestion is shown
+  and recorded; no code reads it as the severity.
+
+## 3. What I left out, and why
+
+Out of scope from the start, as section 1 says: sign-in and roles, a second inspector's
+sign-off, deferral limits from a minimum equipment list, notifications, adding aircraft
+from the pages (the fleet is seeded), editing or deleting (a correction is a new
+event), an assignee for a repair, merging duplicate reports, a JSON API, Postgres.
+
+Cut during the build, for time:
+
+- **Questions about the fleet in plain language** (the plan's rank 7, the one
+  tool-using agent). The web PR took three review rounds, and I spent the time on the
+  structural fix they pointed at in place of this feature. Call 18 in section 1
+  describes what it would have been.
+- **A labeled set to measure the severity suggestions** (rank 10). So nothing here says
+  how often the suggestion agrees with a mechanic. The feature is built and tested
+  against stand-in models only.
+- **A generated round-trip test for stored events** (rank 9). Hand-built events cover
+  each kind.
+- **A work list page** of everything open across the fleet. The board's "Needs a repair
+  date" and "Overdue" columns carry the same facts per aircraft.
+- **A withdrawal event** for a write-up filed in error (call 19).
+
+Known limits in what was built:
+
+- **Names are claims.** The forms take any name typed. Section 1's call 7 said the
+  forms would offer the seeded people's names; they don't.
+- **A refused form loses what was typed.** A 400 shows the reason and an empty form.
+  Asking for a suggestion keeps the description but not the name or severity.
+- **Time.** Each action is dated by the server's clock, and a time a form posts is
+  ignored. The clock is read before the store's write transaction begins, so of two
+  actions on one write-up at nearly the same moment, the one recorded second can
+  carry the earlier time and be refused as out of order; the person retries. "Overdue" uses the UTC day.
+- **The past view goes by recording time**, as call 1 says.
+- **Fresh data on each start** unless `--db` names a file.
+- **Suggestions.** The app seals each suggestion to its description with a key made at
+  start, so one asked for before a restart is refused after it. Nothing bounds the
+  description's length or the model call's time, and each click is a paid call. A
+  write-up's description is text anyone can file and the model reads it, so a
+  description can try to steer the suggestion; the person still picks.
+- **Rough edges at the form boundary**: a repeated field or an uploaded file is
+  refused on the aircraft's page in the validation library's words, not this app's,
+  and a field over 1 MiB gets a bare 400 from the framework.
+- **The three severities are written out** as options in two forms; a fourth would
+  have to be added to both by hand.
+
+## 4. What comes next, with more time
+
+1. A grounding history per aircraft ("grounded from Tuesday 09:00 to Wednesday
+   14:00"). The log already holds it.
+2. The withdrawal event.
+3. A labeled set for the severity suggestions, then the fleet-questions agent with a
+   set of questions whose answers are known, since nothing would otherwise measure
+   either.
+4. Keeping a refused form's values.
+5. Sign-in, so a name in the history is an identity, and with it inspector sign-off and
+   deferral limits.
+
+## 5. How I used AI
+
+**Before the clock**, with an AI assistant's help, I chose the stack and probed it
+against this repository's gates (Ruff with every rule, three type checkers, 100% branch
+coverage, mutation testing), and wrote `docs/build-plan.md`: the product calls with a
+default for each, the module design, the sample data, the order of work and the cut
+line. The plan records probes dated 2026-11-19 and 2026-11-24 and a timing rehearsal
+that was stopped and discarded. It is committed unchanged, so the repository shows what
+I started from. No application code existed when the clock started.
+
+**On the clock**, a coding agent (Claude Code) wrote all of the application code, the
+tests and these documents in one session, whose log is submitted with this. What I did:
+
+- I had it read the brief and criticize the plan before building. It proposed four
+  changes and one new call, which I accepted; section 1 lists them.
+- I confirmed or flipped each product call.
+- I set the process: one pull request per stage; checks and mutation testing green
+  before each push; a design review and a correctness review of each pull request by
+  separate agent runs that see the code and not the author's reasoning; a second
+  review after any severe finding; merge only after that.
+- I corrected lint and typing problems I saw as it worked.
+- With about half an hour left I asked for a better-looking frontend. The pages
+  already existed, so the agent restyled them (#9) and checked the result from
+  headless-browser screenshots in both color schemes.
+
+What the reviews changed, since that is where the agent's first drafts were wrong:
+
+- The web PR (#6) took three rounds. The first found two inputs that crashed a page (a
+  past time outside the years a date can hold, and a write-up number past 64 bits) and
+  rules copied into the templates. The agent's fix for the copies left new copies, and
+  the second round found them. At that point it stopped patching and moved every such
+  decision out of the templates into typed code; a third check found one more, fixed
+  the same way. That cost the fleet-questions feature.
+- The suggestion PR (#7): both reviews found that the form's carried suggestion was
+  trusted whole, so a suggestion could be recorded against a description the model
+  never saw. The app now seals each suggestion to its description.
+
+- These documents: a separate run checked the README's walk-through and sections 2
+  to 4 here against the running app. It found the walk-through's past view leaving
+  out a grounded aircraft and two limits described loosely; all three are corrected.
+
+What I would not claim: that the agent's output was right the first time, or that the
+suggestion feature has been measured. The reviews above are other runs of the same
+model family, not an independent person's review. The key for the model is in a local
+`.env` the agent was told never to read; no test calls the real model.
