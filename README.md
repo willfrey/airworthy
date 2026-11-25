@@ -54,7 +54,7 @@ Things to try:
    write-ups nobody has scheduled. Set a date in the past and the write-up moves to
    "Overdue".
 3. **A past moment.** Enter a time two days back in "Show the fleet as it stood at
-   (UTC)". N103AW is grounded, N102AW, N105AW and N106AW are cleared, and the pages
+   (UTC)". N103AW and N104AW are grounded, the other four are cleared, and the pages
    offer no actions: a past view can't be changed. The same view is a link: `/?at=`
    followed by a time such as `2026-11-23T12:00`.
 4. **Corrections are events.** On N106AW, one write-up was reported high and lowered to

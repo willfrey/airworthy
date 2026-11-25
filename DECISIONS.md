@@ -105,8 +105,8 @@ Known limits in what was built:
   Asking for a suggestion keeps the description but not the name or severity.
 - **Time.** Each action is dated by the server's clock, and a time a form posts is
   ignored. The clock is read before the store's write transaction begins, so of two
-  actions on one write-up in the same instant the second can carry the earlier time
-  and be refused as out of order; the person retries. "Overdue" uses the UTC day.
+  actions on one write-up at nearly the same moment, the one recorded second can
+  carry the earlier time and be refused as out of order; the person retries. "Overdue" uses the UTC day.
 - **The past view goes by recording time**, as call 1 says.
 - **Fresh data on each start** unless `--db` names a file.
 - **Suggestions.** The app seals each suggestion to its description with a key made at
@@ -114,8 +114,9 @@ Known limits in what was built:
   description's length or the model call's time, and each click is a paid call. A
   write-up's description is text anyone can file and the model reads it, so a
   description can try to steer the suggestion; the person still picks.
-- **Rough edges at the form boundary**: a repeated field, an uploaded file or a field
-  over 1 MiB gets a 400 worded by the framework, not by this app.
+- **Rough edges at the form boundary**: a repeated field or an uploaded file is
+  refused on the aircraft's page in the validation library's words, not this app's,
+  and a field over 1 MiB gets a bare 400 from the framework.
 - **The three severities are written out** as options in two forms; a fourth would
   have to be added to both by hand.
 
@@ -167,6 +168,10 @@ What the reviews changed, since that is where the agent's first drafts were wron
 - The suggestion PR (#7): both reviews found that the form's carried suggestion was
   trusted whole, so a suggestion could be recorded against a description the model
   never saw. The app now seals each suggestion to its description.
+
+- These documents: a separate run checked the README's walk-through and sections 2
+  to 4 here against the running app. It found the walk-through's past view leaving
+  out a grounded aircraft and two limits described loosely; all three are corrected.
 
 What I would not claim: that the agent's output was right the first time, or that the
 suggestion feature has been measured. The reviews above are other runs of the same
