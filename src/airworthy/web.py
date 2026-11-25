@@ -92,6 +92,16 @@ class NotATimeError(Exception):
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
+class Stands:
+    """What a page says of where a write-up stands: one answer for each `Standing`."""
+
+    text: str
+    open: bool
+    urgent: bool
+    """Whether to mark it for attention: open, and with no repair date or past it."""
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
 class Entry:
     """One write-up as it was known at a moment, and where it stood then."""
 
@@ -102,14 +112,9 @@ class Entry:
     """The kinds of follow-up the write-up's state allows, in the order offered."""
 
     @property
-    def stands(self) -> str:
-        """Where the write-up stood, in words."""
+    def stands(self) -> Stands:
+        """What a page says of where the write-up stood."""
         return _stands(self.standing)
-
-    @property
-    def urgent(self) -> bool:
-        """Whether it is open and either has no repair date or is past it."""
-        return isinstance(self.standing, Waiting | Overdue)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -123,7 +128,7 @@ class Row:
     @property
     def open(self) -> int:
         """How many of its write-ups were open."""
-        return sum(not isinstance(entry.standing, Closed) for entry in self.entries)
+        return sum(entry.stands.open for entry in self.entries)
 
     @property
     def waiting(self) -> tuple[int, ...]:
@@ -309,18 +314,21 @@ def _stamp(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime(STAMP)
 
 
-def _stands(standing: Standing) -> str:
-    """Say where a write-up stands, as the line under its title."""
+def _stands(standing: Standing) -> Stands:
+    """Give everything a page decides by where a write-up stands, in one place."""
     match standing:
         case Closed():
             at = _stamp(standing.at)
-            return f"resolved by {standing.by} at {at}: {standing.note}"
+            text = f"resolved by {standing.by} at {at}: {standing.note}"
+            return Stands(text=text, open=False, urgent=False)
         case Waiting():
-            return "open, needs a repair date"
+            return Stands(text="open, needs a repair date", open=True, urgent=True)
         case Overdue():
-            return f"open, overdue: repair was set for {standing.on}"
+            text = f"open, overdue: repair was set for {standing.on}"
+            return Stands(text=text, open=True, urgent=True)
         case Due():
-            return f"open, repair set for {standing.on}"
+            text = f"open, repair set for {standing.on}"
+            return Stands(text=text, open=True, urgent=False)
         case unreachable:
             assert_never(unreachable)
 

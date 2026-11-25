@@ -531,7 +531,7 @@ def test_a_template_that_names_something_it_was_not_given_fails() -> None:
 def test_only_a_write_up_waiting_or_overdue_is_marked_for_attention(
     client: TestClient,
 ) -> None:
-    """On N106AW, #8 waits for a repair date and #10 is resolved."""
+    """On N106AW, #8 waits for a repair date, #9 has one and #10 is resolved."""
     page = client.get("/aircraft/N106AW").text
     overdue = client.get("/aircraft/N103AW").text
     waiting = page[page.index('id="write-up-8"') :]
@@ -539,4 +539,5 @@ def test_only_a_write_up_waiting_or_overdue_is_marked_for_attention(
 
     assert '<p class="standing overdue">high severity, open, needs' in waiting
     assert '<p class="standing">' in resolved.split("</p>")[0]
+    assert '<p class="standing">medium severity, open, repair set for' in page
     assert '<p class="standing overdue">medium severity, open, overdue' in overdue

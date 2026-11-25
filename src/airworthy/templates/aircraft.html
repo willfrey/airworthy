@@ -21,7 +21,7 @@
 {% set state = entry.state %}
 <article id="write-up-{{ write_up.id }}">
   <h2>#{{ write_up.id }} {{ write_up.reported.description }}</h2>
-  <p class="standing{{ " overdue" if entry.urgent else "" }}">{{ state.severity }} severity, {{ entry.stands }}</p>
+  <p class="standing{{ " overdue" if entry.stands.urgent else "" }}">{{ state.severity }} severity, {{ entry.stands.text }}</p>
   <ol class="history">
     <li>{{ stamp(write_up.reported.at) }} {{ write_up.reported.by }} reported it as {{ write_up.reported.severity }}</li>
     {% for event in write_up.later %}
