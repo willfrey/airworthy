@@ -14,7 +14,11 @@ and recorded with the report.
 """
 
 import argparse
+import hashlib
+import hmac
+import json
 import os
+import secrets
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -80,6 +84,10 @@ FILE: Final = "/aircraft/{tail}/write-ups"
 EVENTS: Final = "/write-ups/{write_up_id}/events"
 SUGGEST: Final = "/aircraft/{tail}/suggestion"
 API_KEY: Final = "ANTHROPIC_API_KEY"
+NOT_FOR_THIS: Final = (
+    "that suggestion was not made for this description; ask for another, or file"
+    " without one"
+)
 
 type Clock = Callable[[], datetime]
 """Tells the moment an action is taken; it must carry a time zone."""
@@ -107,10 +115,21 @@ class Described(Model):
     description: Text
 
 
-class Carried(Model):
-    """The suggestion a filing form carries back, as the JSON the page put in it."""
+class Sealed(Model):
+    """A suggestion with the app's seal on it and on the description it was made for.
 
-    suggested: Json[Suggestion] | None = None
+    The filing form carries it, and only one whose seal fits the description filed is
+    recorded: one made for other words, or made up, is refused.
+    """
+
+    suggestion: Suggestion
+    seal: str
+
+
+class Carried(Model):
+    """What a filing form carries back of a suggestion, as the JSON the page put in."""
+
+    suggested: Json[Sealed] | None = None
 
 
 class NotATimeError(Exception):
@@ -186,7 +205,7 @@ class Draft:
     """A write-up being filled in: what was typed, and the suggestion asked for."""
 
     description: str
-    suggested: Suggestion | None
+    suggested: Sealed | None
 
 
 class Serve(Protocol):
@@ -209,8 +228,22 @@ class Pages:
 
     store: Store
     clock: Clock
-    suggests: bool
-    """Whether the filing form offers to suggest a severity."""
+    suggester: Suggester | None
+    """Suggests a severity; without one the filing form doesn't offer to."""
+    key: bytes
+    """Seals each suggestion to its description; a secret of this app alone."""
+
+    def seal(self, description: str, suggestion: Suggestion) -> Sealed:
+        """Seal a suggestion to the description it was made for."""
+        parts = (description, suggestion.severity, suggestion.reason)
+        signed = json.dumps(parts).encode()
+        seal = hmac.new(self.key, signed, hashlib.sha256).hexdigest()
+        return Sealed(suggestion=suggestion, seal=seal)
+
+    def sealed(self, description: str, carried: Sealed) -> bool:
+        """Tell whether this app sealed a carried suggestion to `description`."""
+        made = self.seal(description, carried.suggestion)
+        return hmac.compare_digest(made.seal.encode(), carried.seal.encode())
 
     def page(
         self,
@@ -230,7 +263,7 @@ class Pages:
             row=_row(self.store, self.store.aircraft(tail), moment),
             problem=problem,
             draft=draft,
-            suggests=self.suggests,
+            suggests=self.suggester is not None,
         )
 
     def board(self, at: str = "") -> HTMLResponse:
@@ -252,11 +285,15 @@ class Pages:
         posted = form.posted()
         carried = {"suggested": posted.get("suggested")}
         try:
-            suggested = Carried.model_validate(carried).suggested
+            sealed = Carried.model_validate(carried).suggested
+            suggested = None if sealed is None else sealed.suggestion
             fields = {**posted, "suggested": suggested, "at": now}
             reported = Reported.model_validate(fields)
         except ValidationError as error:
             return self.page(tail, now, problem=Problem(text=_problems(error)))
+        if sealed is not None and not self.sealed(reported.description, sealed):
+            draft = Draft(description=reported.description, suggested=None)
+            return self.page(tail, now, problem=Problem(text=NOT_FOR_THIS), draft=draft)
         _ = self.store.file(tail, reported)
         return _back(tail)
 
@@ -296,11 +333,12 @@ class Triage:
             problem = Problem(text=_problems(error))
             return self.pages.page(tail, now, problem=problem)
         try:
-            draft = Draft(description=description, suggested=self.ask(description))
+            sealed = self.pages.seal(description, self.ask(description))
         except NoSuggestionError as error:
             problem = Problem(text=str(error), status=HTTPStatus.BAD_GATEWAY)
             kept = Draft(description=description, suggested=None)
             return self.pages.page(tail, now, problem=problem, draft=kept)
+        draft = Draft(description=description, suggested=sealed)
         return self.pages.page(tail, now, draft=draft)
 
 
@@ -319,13 +357,15 @@ def create_app(
         The app, ready to serve.
     """
     app = FastAPI()
-    pages = Pages(store=store, clock=clock, suggests=suggester is not None)
+    # A new key for each app: a suggestion sealed before a restart is refused after it.
+    key = secrets.token_bytes()
+    pages = Pages(store=store, clock=clock, suggester=suggester, key=key)
     app.add_api_route("/", pages.board)
     app.add_api_route("/aircraft/{tail}", pages.aircraft)
     app.add_api_route(FILE, pages.file, methods=POST, response_model=None)
     app.add_api_route(EVENTS, pages.follow_up, methods=POST, response_model=None)
-    if suggester is not None:
-        triage = Triage(pages=pages, ask=suggester)
+    if pages.suggester is not None:
+        triage = Triage(pages=pages, ask=pages.suggester)
         app.add_api_route(SUGGEST, triage.suggestion, methods=POST)
     app.add_exception_handler(NotFoundError, _not_found)
     app.add_exception_handler(NotATimeError, _not_a_time)

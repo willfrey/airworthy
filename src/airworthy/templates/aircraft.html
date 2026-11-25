@@ -50,11 +50,11 @@
     <legend>File a write-up</legend>
     <p><label>What is wrong <textarea name="description" rows="2" cols="60" required>{{ draft.description if draft else "" }}</textarea></label></p>
     {% if draft and draft.suggested %}
-    <p id="suggestion">Suggested severity: <strong>{{ draft.suggested.severity }}</strong>.
+    <p id="suggestion">Suggested severity: <strong>{{ draft.suggested.suggestion.severity }}</strong>.
       A model generated this from the description; the choice below is yours.
       <input type="hidden" name="suggested" value="{{ draft.suggested.model_dump_json() }}">
     </p>
-    <details><summary>Why</summary>{{ draft.suggested.reason }}</details>
+    <details><summary>Why</summary>{{ draft.suggested.suggestion.reason }}</details>
     {% endif %}
     <p>Severity (a high one grounds the aircraft until it is resolved):
       <label><input type="radio" name="severity" value="high" required> high</label>

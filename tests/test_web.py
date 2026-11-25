@@ -611,7 +611,8 @@ def test_a_suggestion_is_recorded_beside_the_severity_the_person_picked(
 def test_a_report_filed_at_the_suggested_severity_carries_no_warning(
     triaged: TestClient,
 ) -> None:
-    suggested = _suggest("Tyre worn").model_dump_json()
+    asked = {"description": "Tyre worn"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
     form = {"by": "Ana", "severity": "high", "description": "Tyre worn"}
 
     _ = triaged.post(
@@ -639,7 +640,7 @@ def test_a_report_filed_without_asking_tells_of_no_suggestion(
     [
         ("{high", "suggested: Invalid JSON: key must be a string at line 1 column 2"),
         (
-            '{"severity": "extreme", "reason": "Fluid"}',
+            '{"suggestion": {"severity": "extreme", "reason": "Fluid"}, "seal": "0"}',
             "severity: Input should be 'high', 'medium' or 'low'",
         ),
     ],
@@ -655,6 +656,43 @@ def test_a_carried_suggestion_that_is_not_one_is_refused(
 
     assert page.status_code == HTTPStatus.BAD_REQUEST
     assert _problem(page) == problem
+    assert len(store.write_ups("N101AW")) == 1
+
+
+def test_a_suggestion_is_not_recorded_for_a_description_it_was_not_made_for(
+    triaged: TestClient, store: Store
+) -> None:
+    """The person asked about one description, then filed another."""
+    asked = {"description": "Coffee stain on a seat"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
+    form = {"description": "Engine fire warning light on", "suggested": suggested}
+
+    page = triaged.post(
+        "/aircraft/N101AW/write-ups", data={**form, "by": "Ana", "severity": "low"}
+    )
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == (
+        "that suggestion was not made for this description; ask for another, or file"
+        " without one"
+    )
+    assert ">Engine fire warning light on</textarea>" in page.text
+    assert 'name="suggested"' not in page.text
+    assert len(store.write_ups("N101AW")) == 1
+
+
+def test_a_suggestion_this_app_did_not_seal_is_refused(
+    client: TestClient, triaged: TestClient, store: Store
+) -> None:
+    """Another app sealed it, with a key of its own: here it is as good as made up."""
+    asked = {"description": "Tyre worn"}
+    suggested = _carried(triaged.post("/aircraft/N101AW/suggestion", data=asked))
+    form = {**asked, "by": "Ana", "severity": "low", "suggested": suggested}
+
+    page = client.post("/aircraft/N101AW/write-ups", data=form)
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page).startswith("that suggestion was not made for this")
     assert len(store.write_ups("N101AW")) == 1
 
 
@@ -704,7 +742,7 @@ def test_a_suggestion_for_an_unknown_aircraft_is_not_found_and_asks_no_model(
 
 def test_a_page_asked_for_without_a_moment_is_shown_as_of_now(store: Store) -> None:
     """Called as a function, as the app calls it once a request has no `at`."""
-    pages = Pages(store=store, clock=_now, suggests=False)
+    pages = Pages(store=store, clock=_now, suggester=None, key=b"a key")
 
     assert pages.board().status_code == HTTPStatus.OK
     assert pages.aircraft("N101AW").status_code == HTTPStatus.OK

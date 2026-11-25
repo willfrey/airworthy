@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, UserError
 from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
@@ -20,6 +20,20 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 ANSWER = {"severity": "high", "reason": "Fluid under a gear can be a brake line leak"}
+INSTRUCTIONS = """\
+You help a person file an aircraft maintenance write-up. Given their description of a \
+defect, suggest its severity.
+
+- high: the aircraft should not fly until this is repaired. Choose it when the defect \
+could affect the safety of a flight: structure, flight controls, engines, fuel, \
+landing gear, pressurization, fire protection, or instruments and systems a flight \
+depends on.
+- medium: the aircraft can fly, and the repair should be planned soon.
+- low: cosmetic or a matter of comfort, with no effect on the safety of a flight.
+
+When the description leaves the choice open, suggest the higher severity. Give a \
+short reason that names anything that would change the severity. The person makes \
+the final choice, so write the reason for them."""
 
 
 def test_a_suggestion_is_the_severity_and_reason_the_model_answered() -> None:
@@ -48,7 +62,7 @@ def test_the_model_is_given_the_instructions_and_the_description_alone() -> None
     with triage.agent.override(model=FunctionModel(answer)):
         _ = triage.suggest("Fluid under the left main gear")
 
-    assert asked == [(triage.INSTRUCTIONS.strip(), ["Fluid under the left main gear"])]
+    assert asked == [(INSTRUCTIONS, ["Fluid under the left main gear"])]
 
 
 def test_a_model_that_can_not_be_reached_gives_no_suggestion() -> None:
@@ -64,6 +78,20 @@ def test_a_model_that_can_not_be_reached_gives_no_suggestion() -> None:
     assert str(refused.value) == (
         "the model gave no suggestion; choose a severity yourself"
     )
+
+
+def test_a_model_that_is_not_set_up_gives_no_suggestion() -> None:
+    """pydantic-ai raises `UserError`, no `AgentRunError`, for a missing key."""
+
+    def fail(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        msg = "Set the ANTHROPIC_API_KEY environment variable"
+        raise UserError(msg)
+
+    with (
+        triage.agent.override(model=FunctionModel(fail)),
+        pytest.raises(triage.NoSuggestionError),
+    ):
+        _ = triage.suggest("Fluid under the left main gear")
 
 
 def test_an_answer_that_is_no_suggestion_gives_no_suggestion() -> None:

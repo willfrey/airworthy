@@ -52,6 +52,27 @@ class Severity(StrEnum):
             case unreachable:
                 assert_never(unreachable)
 
+    @property
+    def meaning(self) -> str:
+        """What the severity means, as a model asked to suggest one is told."""
+        match self:
+            case Severity.HIGH:
+                return (
+                    "the aircraft should not fly until this is repaired. Choose it when"
+                    " the defect could affect the safety of a flight: structure, flight"
+                    " controls, engines, fuel, landing gear, pressurization, fire"
+                    " protection, or instruments and systems a flight depends on."
+                )
+            case Severity.MEDIUM:
+                return "the aircraft can fly, and the repair should be planned soon."
+            case Severity.LOW:
+                return (
+                    "cosmetic or a matter of comfort, with no effect on the safety of a"
+                    " flight."
+                )
+            case unreachable:
+                assert_never(unreachable)
+
     def below(self, other: Severity) -> bool:
         """Tell whether this severity is less serious than `other`."""
         order = list(Severity)
