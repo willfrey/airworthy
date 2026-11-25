@@ -8,6 +8,7 @@ stored nowhere.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from airworthy.model import Model
 from airworthy.writeup import Open, known_at, latest
 
 if TYPE_CHECKING:
@@ -15,6 +16,13 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from airworthy.writeup import WriteUp
+
+
+class Aircraft(Model):
+    """One aircraft in the fleet, known by its tail number."""
+
+    tail: str
+    type: str
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
