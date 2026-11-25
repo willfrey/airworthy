@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 from fastapi.testclient import TestClient
+from jinja2 import UndefinedError
 
 from airworthy import seed
 from airworthy.fleet import Aircraft
 from airworthy.store import Store
-from airworthy.web import create_app, main
+from airworthy.web import ENVIRONMENT, create_app, main
 from airworthy.writeup import (
     Reclassified,
     Reopened,
@@ -340,14 +341,14 @@ def test_a_follow_up_the_state_refuses_is_told_on_the_aircraft_page(
 def test_a_follow_up_with_blank_fields_is_refused_and_names_them(
     client: TestClient, store: Store
 ) -> None:
-    """A field left empty arrives as one not posted, and one of spaces as blank."""
     form = {"kind": "resolved", "note": "", "by": " "}
 
     page = client.post("/write-ups/2/events", data=form)
 
     assert page.status_code == HTTPStatus.BAD_REQUEST
     assert _problem(page) == (
-        "by: String should have at least 1 character; note: Field required"
+        "by: String should have at least 1 character;"
+        " note: String should have at least 1 character"
     )
     assert len(store.write_up(2).later) == 1
 
@@ -430,3 +431,98 @@ def test_what_a_person_typed_is_shown_as_text_and_never_as_markup(
     for page in (client.get("/"), client.get("/aircraft/N101AW")):
         assert "&lt;b&gt;Tyre&lt;/b&gt; worn" in page.text
         assert "<b>Tyre</b>" not in page.text
+
+
+@pytest.mark.parametrize("at", ["9999-12-31T23:00-05:00", "0001-01-01T00:00+05:00"])
+@pytest.mark.parametrize("path", ["/", "/aircraft/N102AW"])
+def test_a_moment_outside_the_years_a_page_can_tell_is_a_bad_request(
+    client: TestClient, path: str, at: str
+) -> None:
+    page = client.get(path, params={"at": at})
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == f"{at} isn't a time such as 2026-01-15T12:00"
+
+
+def test_a_write_up_id_too_large_for_the_database_is_not_found(
+    client: TestClient,
+) -> None:
+    form = {"kind": "resolved", "by": "Sam Okafor", "note": "Replaced the tyre"}
+
+    page = client.post(f"/write-ups/{2**63}/events", data=form)
+
+    assert page.status_code == HTTPStatus.NOT_FOUND
+    assert _problem(page) == "no write-up 9223372036854775808"
+
+
+def test_a_field_no_event_has_is_refused_on_the_aircraft_page(
+    client: TestClient, store: Store
+) -> None:
+    form = {"kind": "resolved", "by": "Sam", "note": "Replaced it", "extra": "1"}
+
+    page = client.post("/write-ups/2/events", data=form)
+
+    assert page.status_code == HTTPStatus.BAD_REQUEST
+    assert _problem(page) == "extra: Extra inputs are not permitted"
+    assert len(store.write_up(2).later) == 1
+
+
+def test_a_time_a_form_posts_is_ignored_for_the_clocks(
+    client: TestClient, store: Store
+) -> None:
+    """Nobody chooses when their action happened: the server's clock says."""
+    form = {"by": "Ana", "severity": "low", "description": "Tyre worn"}
+
+    _ = client.post("/aircraft/N101AW/write-ups", data={**form, "at": "2020-01-01Z"})
+    _ = client.post(
+        "/write-ups/11/events",
+        data={"kind": "resolved", "by": "Sam", "note": "Done", "at": "2020-01-01Z"},
+    )
+
+    filed = store.write_up(11)
+    assert [filed.reported.at, *(event.at for event in filed.later)] == [NOW, NOW]
+
+
+def test_a_past_view_keeps_the_moment_asked_for_and_links_back_to_now(
+    client: TestClient,
+) -> None:
+    board = client.get("/", params={"at": TWO_DAYS_EARLIER})
+    aircraft = client.get("/aircraft/N102AW", params={"at": TWO_DAYS_EARLIER})
+
+    assert f'name="at" value="{TWO_DAYS_EARLIER}"' in board.text
+    assert '<a href="/">Back to now</a>' in board.text
+    assert '<a href="/aircraft/N102AW">Back to now</a>' in aircraft.text
+    assert "Back to now" not in client.get("/").text
+    assert "Back to now" not in client.get("/aircraft/N102AW").text
+
+
+def test_an_aircraft_with_no_write_ups_says_so(
+    client: TestClient, store: Store
+) -> None:
+    store.add_aircraft(Aircraft(tail="N1", type="Piper Cub"))
+
+    now = client.get("/aircraft/N1")
+    earlier = client.get("/aircraft/N102AW", params={"at": "2020-01-01"})
+
+    assert "<p>No write-ups.</p>" in now.text
+    assert "<p>No write-ups by then.</p>" in earlier.text
+
+
+def test_an_aircraft_grounded_twice_names_both_write_ups(client: TestClient) -> None:
+    form = {"by": "Ana Reyes", "severity": "high", "description": "Tyre worn"}
+
+    _ = client.post("/aircraft/N101AW/write-ups", data=form)
+    _ = client.post("/aircraft/N101AW/write-ups", data=form)
+
+    page = client.get("/aircraft/N101AW")
+    assert _part(page, "status", "</p>") == "Grounded by #11, #12"
+
+
+def test_a_page_says_it_is_utf_8(client: TestClient) -> None:
+    assert '<meta charset="utf-8">' in client.get("/").text
+
+
+def test_a_template_that_names_something_it_was_not_given_fails() -> None:
+    """A misspelled name in a page must not render as nothing."""
+    with pytest.raises(UndefinedError, match="'misspelled' is undefined"):
+        _ = ENVIRONMENT.from_string("{{ misspelled }}").render()

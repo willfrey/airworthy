@@ -14,10 +14,10 @@ Nothing here stores a state: `latest` folds a log to its state, and `known_at` c
 log to what was known at a moment.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date
-from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, assert_never
+from enum import Enum, StrEnum, auto
+from typing import TYPE_CHECKING, Annotated, Final, Literal, assert_never
 
 from pydantic import AwareDatetime, Field, StringConstraints
 
@@ -102,6 +102,12 @@ type FollowUp = Annotated[
 ]
 """An event on a write-up that its report already opened, told apart by `kind`."""
 
+type Kind = Literal["scheduled", "resolved", "reopened", "reclassified"]
+"""The `kind` of a follow-up."""
+
+KINDS: Final[tuple[Kind, ...]] = ("scheduled", "resolved", "reopened", "reclassified")
+"""Every kind of follow-up, in the order a page offers them."""
+
 
 class WriteUp(Model):
     """A write-up's log: exactly one report, then its follow-ups in log order."""
@@ -146,6 +152,50 @@ def opened(reported: Reported) -> Open:
     return Open(severity=reported.severity, scheduled_for=None, as_of=reported.at)
 
 
+def refusal(state: State, kind: Kind) -> str | None:
+    """Say why the module's table refuses a kind of follow-up on a state.
+
+    This is the table's one home: `apply` refuses by it, and `allowed` reads it.
+
+    Returns:
+        The refusal in words for the person, or `None` when the table allows the kind.
+    """
+    match state:
+        case Open():
+            return _refusal_on_open(kind)
+        case Closed():
+            return _refusal_on_closed(kind)
+        case unreachable:
+            assert_never(unreachable)
+
+
+def _refusal_on_open(kind: Kind) -> str | None:
+    match kind:
+        case "reopened":
+            return "this write-up is already open"
+        case "reclassified" | "scheduled" | "resolved":
+            return None
+        case unreachable:
+            assert_never(unreachable)
+
+
+def _refusal_on_closed(kind: Kind) -> str | None:
+    match kind:
+        case "scheduled":
+            return "a resolved write-up can't be scheduled; reopen it first"
+        case "resolved":
+            return "this write-up is already resolved"
+        case "reclassified" | "reopened":
+            return None
+        case unreachable:
+            assert_never(unreachable)
+
+
+def allowed(state: State) -> tuple[Kind, ...]:
+    """Name the kinds of follow-up `apply` accepts on a state, in `KINDS`' order."""
+    return tuple(kind for kind in KINDS if refusal(state, kind) is None)
+
+
 def apply(state: State, event: FollowUp) -> State:
     """Give the state `event` moves `state` to, by the module's table.
 
@@ -163,23 +213,13 @@ def apply(state: State, event: FollowUp) -> State:
     if event.at < state.as_of:
         msg = "an event can't be dated before the write-up's last event"
         raise RefusedError(msg)
-    match state:
-        case Open():
-            return _on_open(state, event)
-        case Closed():
-            return _on_closed(state, event)
-        case unreachable:
-            assert_never(unreachable)
-
-
-def _on_open(state: Open, event: FollowUp) -> State:
+    refused = refusal(state, event.kind)
+    if refused is not None:
+        raise RefusedError(refused)
+    # Past the table, each kind does one thing whatever the state it is allowed on.
     match event:
         case Reclassified():
-            return Open(
-                severity=event.severity,
-                scheduled_for=state.scheduled_for,
-                as_of=event.at,
-            )
+            return replace(state, severity=event.severity, as_of=event.at)
         case Scheduled():
             return Open(severity=state.severity, scheduled_for=event.on, as_of=event.at)
         case Resolved():
@@ -190,29 +230,6 @@ def _on_open(state: Open, event: FollowUp) -> State:
                 note=event.note,
                 as_of=event.at,
             )
-        case Reopened():
-            msg = "this write-up is already open"
-            raise RefusedError(msg)
-        case unreachable:
-            assert_never(unreachable)
-
-
-def _on_closed(state: Closed, event: FollowUp) -> State:
-    match event:
-        case Reclassified():
-            return Closed(
-                severity=event.severity,
-                at=state.at,
-                by=state.by,
-                note=state.note,
-                as_of=event.at,
-            )
-        case Scheduled():
-            msg = "a resolved write-up can't be scheduled; reopen it first"
-            raise RefusedError(msg)
-        case Resolved():
-            msg = "this write-up is already resolved"
-            raise RefusedError(msg)
         case Reopened():
             return Open(severity=state.severity, scheduled_for=None, as_of=event.at)
         case unreachable:
@@ -251,13 +268,14 @@ def latest(write_up: WriteUp) -> State:
     return state
 
 
-class Standing(StrEnum):
-    """Where a write-up stands on its way to repair, in the words a person reads."""
+class Standing(Enum):
+    """Where a write-up stands on its way to repair."""
 
-    WAITING = "needs a repair date"
-    SCHEDULED = "scheduled"
-    OVERDUE = "overdue"
-    RESOLVED = "resolved"
+    WAITING = auto()
+    """Open, with no repair date."""
+    SCHEDULED = auto()
+    OVERDUE = auto()
+    RESOLVED = auto()
 
 
 def standing(state: State, moment: datetime) -> Standing:

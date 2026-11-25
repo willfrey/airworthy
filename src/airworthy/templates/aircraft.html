@@ -22,44 +22,41 @@
 <article id="write-up-{{ write_up.id }}">
   <h2>#{{ write_up.id }} {{ write_up.reported.description }}</h2>
   <p class="standing">{{ state.severity }} severity,
-    {% if entry.standing == "resolved" %}
+    {% if entry.standing == Standing.RESOLVED %}
     resolved by {{ state.by }} at {{ stamp(state.at) }}: {{ state.note }}
-    {% elif entry.standing == "needs a repair date" %}
+    {% elif entry.standing == Standing.WAITING %}
     open, <span class="overdue">needs a repair date</span>
-    {% elif entry.standing == "overdue" %}
+    {% elif entry.standing == Standing.OVERDUE %}
     open, <span class="overdue">overdue</span>: repair was set for {{ state.scheduled_for }}
-    {% else %}
+    {% elif entry.standing == Standing.SCHEDULED %}
     open, repair set for {{ state.scheduled_for }}
     {% endif %}
   </p>
   <ol class="history">
     <li>{{ stamp(write_up.reported.at) }} {{ write_up.reported.by }} reported it as {{ write_up.reported.severity }}</li>
     {% for event in write_up.later %}
-    <li>{{ stamp(event.at) }} {{ event.by }}
-      {% if event.kind == "reclassified" %}changed the severity to {{ event.severity }}: {{ event.reason }}
-      {% elif event.kind == "scheduled" %}set the repair for {{ event.on }}
-      {% elif event.kind == "resolved" %}resolved it: {{ event.note }}
-      {% else %}reopened it: {{ event.reason }}
-      {% endif %}
-    </li>
+    <li>{{ stamp(event.at) }} {{ event.by }} {{ told(event) }}</li>
     {% endfor %}
   </ol>
   {% if not at %}
   {% set events = "/write-ups/" ~ write_up.id ~ "/events" %}
-  {% if entry.standing != "resolved" %}
+  {% if "scheduled" in entry.offers %}
   <form class="action" method="post" action="{{ events }}">
     <input type="hidden" name="kind" value="scheduled">
     <label>Repair date <input type="date" name="on" required></label>
     <label>Your name <input name="by" required></label>
     <button>Set the repair date</button>
   </form>
+  {% endif %}
+  {% if "resolved" in entry.offers %}
   <form class="action" method="post" action="{{ events }}">
     <input type="hidden" name="kind" value="resolved">
     <label>What was done <input name="note" required></label>
     <label>Your name <input name="by" required></label>
     <button>Resolve</button>
   </form>
-  {% else %}
+  {% endif %}
+  {% if "reopened" in entry.offers %}
   <form class="action" method="post" action="{{ events }}">
     <input type="hidden" name="kind" value="reopened">
     <label>Why it is back <input name="reason" required></label>
@@ -67,6 +64,7 @@
     <button>Reopen</button>
   </form>
   {% endif %}
+  {% if "reclassified" in entry.offers %}
   <form class="action" method="post" action="{{ events }}">
     <input type="hidden" name="kind" value="reclassified">
     <label>Severity
@@ -79,6 +77,7 @@
     <label>Your name <input name="by" required></label>
     <button>Change the severity</button>
   </form>
+  {% endif %}
   {% endif %}
 </article>
 {% else %}

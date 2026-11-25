@@ -260,3 +260,10 @@ def test_write_ups_are_read_for_one_aircraft_or_for_the_whole_fleet(
         (first, "N101AW", 1),
         (second, "N102AW", 0),
     ]
+
+
+def test_an_id_too_large_for_the_database_is_an_unknown_write_up(store: Store) -> None:
+    with pytest.raises(NotFoundError) as missing:
+        _ = store.write_up(2**63)
+
+    assert str(missing.value) == "no write-up 9223372036854775808"

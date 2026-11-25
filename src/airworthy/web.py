@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Annotated, Final, Protocol, assert_never
 import uvicorn
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from jinja2 import Environment, PackageLoader
-from pydantic import ValidationError
+from jinja2 import Environment, PackageLoader, StrictUndefined
+from pydantic import ConfigDict, ValidationError
 
 from airworthy import seed
 from airworthy.fleet import Cleared, Grounded, status_at
@@ -29,8 +29,14 @@ from airworthy.model import Model, faults
 from airworthy.store import NotFoundError, Store
 from airworthy.writeup import (
     FollowUp,
+    Reclassified,
     RefusedError,
+    Reopened,
     Reported,
+    Resolved,
+    Scheduled,
+    Standing,
+    allowed,
     known_at,
     latest,
     standing,
@@ -42,9 +48,15 @@ if TYPE_CHECKING:
     from fastapi import Request
 
     from airworthy.fleet import Aircraft, Status
-    from airworthy.writeup import Standing, State, WriteUp
+    from airworthy.writeup import Kind, State, WriteUp
 
-ENVIRONMENT: Final = Environment(loader=PackageLoader("airworthy"), autoescape=True)
+# Strict, so a template that names something the page wasn't given fails loudly
+# where the default would render it as nothing.
+ENVIRONMENT: Final = Environment(
+    loader=PackageLoader("airworthy"),
+    autoescape=True,
+    undefined=StrictUndefined,  # type: ignore[misc]  # jinja2 types the class with Any
+)
 BOARD: Final = "board.html"
 AIRCRAFT: Final = "aircraft.html"
 PROBLEM: Final = "problem.html"
@@ -57,15 +69,13 @@ type Clock = Callable[[], datetime]
 
 
 class ActionForm(Model):
-    """What a form posts: text for whichever fields its action has."""
+    """What a form posts: text under whatever names it posted.
 
-    kind: str | None = None
-    by: str | None = None
-    severity: str | None = None
-    description: str | None = None
-    reason: str | None = None
-    on: str | None = None
-    note: str | None = None
+    It declares no field. `Reported` and each follow-up own theirs, and refuse a
+    name they don't have, so a form's fields are listed in one place.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow")
 
 
 class Action(Model):
@@ -85,6 +95,8 @@ class Entry:
     write_up: WriteUp
     state: State
     standing: Standing
+    offers: tuple[Kind, ...]
+    """The kinds of follow-up the write-up's state allows."""
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -194,12 +206,15 @@ def _moment(at: str, now: datetime) -> datetime:
         return now
     try:
         moment = datetime.fromisoformat(at)
-    except ValueError as error:
+        zoned = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
+        # In UTC here, so a time whose UTC reading falls outside the years a
+        # `datetime` holds is refused now and not when a page formats it. The one
+        # mutant swaps UTC for None, the machine's own zone: the same moment, and
+        # the same call wherever that zone is UTC, as it is on CI.
+        return zoned.astimezone(UTC)  # pragma: no mutate — None is UTC on CI
+    except (ValueError, OverflowError) as error:
         msg = f"{at} isn't a time such as 2026-01-15T12:00"
         raise NotATimeError(msg) from error
-    if moment.tzinfo is None:
-        return moment.replace(tzinfo=UTC)
-    return moment
 
 
 def _row(store: Store, aircraft: Aircraft, moment: datetime) -> Row:
@@ -214,7 +229,12 @@ def _row(store: Store, aircraft: Aircraft, moment: datetime) -> Row:
 
 def _entry(write_up: WriteUp, moment: datetime) -> Entry:
     state = latest(write_up)
-    return Entry(write_up=write_up, state=state, standing=standing(state, moment))
+    return Entry(
+        write_up=write_up,
+        state=state,
+        standing=standing(state, moment),
+        offers=allowed(state),
+    )
 
 
 def _grounding(status: Status) -> tuple[WriteUp, ...]:
@@ -244,7 +264,8 @@ def _aircraft(
 def _page(
     name: str, status: HTTPStatus = HTTPStatus.OK, **context: object
 ) -> HTMLResponse:
-    html = ENVIRONMENT.get_template(name).render(stamp=_stamp, **context)
+    template = ENVIRONMENT.get_template(name)
+    html = template.render(stamp=_stamp, told=_told, Standing=Standing, **context)
     return HTMLResponse(html, status_code=status)
 
 
@@ -254,6 +275,21 @@ def _back(tail: str) -> RedirectResponse:
 
 def _stamp(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime(STAMP)
+
+
+def _told(event: FollowUp) -> str:
+    """Say what a follow-up did, as a line of a write-up's history."""
+    match event:
+        case Reclassified():
+            return f"changed the severity to {event.severity}: {event.reason}"
+        case Scheduled():
+            return f"set the repair for {event.on}"
+        case Resolved():
+            return f"resolved it: {event.note}"
+        case Reopened():
+            return f"reopened it: {event.reason}"
+        case unreachable:
+            assert_never(unreachable)
 
 
 def _problems(error: ValidationError) -> str:

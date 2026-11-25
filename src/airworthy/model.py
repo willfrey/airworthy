@@ -16,8 +16,8 @@ class Model(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     def posted(self) -> dict[str, object]:
-        """Give the fields that were set when the model was built, by name."""
-        return cast("dict[str, object]", self.model_dump(exclude_unset=True))
+        """Give what the model holds, by name: for a form, the fields it posted."""
+        return cast("dict[str, object]", self.model_dump())
 
 
 class Fault(TypedDict):

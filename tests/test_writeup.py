@@ -18,6 +18,7 @@ from airworthy.writeup import (
     Severity,
     Standing,
     WriteUp,
+    allowed,
     apply,
     known_at,
     latest,
@@ -374,3 +375,12 @@ def test_an_event_rejects_a_time_with_no_zone() -> None:
 
     with pytest.raises(ValidationError, match="timezone"):
         _ = Resolved(at=naive, by="Sam Okafor", note="Replaced the pane")
+
+
+def test_a_state_allows_exactly_the_follow_ups_the_table_gives_it() -> None:
+    assert allowed(_open(Severity.HIGH, None, 0)) == (
+        "scheduled",
+        "resolved",
+        "reclassified",
+    )
+    assert allowed(_closed(Severity.HIGH, 5, 5)) == ("reopened", "reclassified")
