@@ -1,0 +1,87 @@
+{
+  "anchor": "2026-01-15T12:00:00Z",
+  "aircraft": [
+    {"tail": "N101AW", "type": "Airbus A320"},
+    {"tail": "N102AW", "type": "Airbus A320"},
+    {"tail": "N103AW", "type": "Boeing 737-800"},
+    {"tail": "N104AW", "type": "Embraer E175"},
+    {"tail": "N105AW", "type": "Embraer E175"},
+    {"tail": "N106AW", "type": "ATR 72-600"}
+  ],
+  "write_ups": [
+    {
+      "tail": "N101AW",
+      "reported": {"kind": "reported", "at": "2026-01-07T14:10:00Z", "by": "Ana Reyes", "severity": "low", "description": "Reading light at seat 14C inoperative"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-07T16:00:00Z", "by": "Dee Park", "on": "2026-01-09"},
+        {"kind": "resolved", "at": "2026-01-09T10:30:00Z", "by": "Sam Okafor", "note": "Replaced the lamp assembly; tested on ground power"}
+      ]
+    },
+    {
+      "tail": "N102AW",
+      "reported": {"kind": "reported", "at": "2026-01-15T09:00:00Z", "by": "Ana Reyes", "severity": "high", "description": "Crack in the windshield outer pane, captain's side"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-15T09:40:00Z", "by": "Dee Park", "on": "2026-01-16"}
+      ]
+    },
+    {
+      "tail": "N103AW",
+      "reported": {"kind": "reported", "at": "2026-01-08T07:20:00Z", "by": "Lin Zhou", "severity": "high", "description": "Hydraulic fluid leaking at the left main gear actuator"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-08T08:00:00Z", "by": "Dee Park", "on": "2026-01-14"},
+        {"kind": "resolved", "at": "2026-01-14T10:00:00Z", "by": "Sam Okafor", "note": "Replaced the actuator seal; leak check passed"}
+      ]
+    },
+    {
+      "tail": "N103AW",
+      "reported": {"kind": "reported", "at": "2026-01-10T11:00:00Z", "by": "Ana Reyes", "severity": "medium", "description": "Weather radar display flickers intermittently"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-10T13:00:00Z", "by": "Dee Park", "on": "2026-01-13"}
+      ]
+    },
+    {
+      "tail": "N104AW",
+      "reported": {"kind": "reported", "at": "2026-01-12T06:45:00Z", "by": "Lin Zhou", "severity": "high", "description": "Bird strike damage to the left engine fan blades"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-12T08:00:00Z", "by": "Dee Park", "on": "2026-01-17"}
+      ]
+    },
+    {
+      "tail": "N104AW",
+      "reported": {"kind": "reported", "at": "2026-01-12T18:30:00Z", "by": "Ana Reyes", "severity": "high", "description": "Cabin pressure controller fault on climb"},
+      "later": []
+    },
+    {
+      "tail": "N105AW",
+      "reported": {"kind": "reported", "at": "2026-01-14T08:00:00Z", "by": "Ana Reyes", "severity": "medium", "description": "Nose wheel steering feels stiff during taxi"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-14T09:00:00Z", "by": "Dee Park", "on": "2026-01-18"},
+        {"kind": "reclassified", "at": "2026-01-14T15:00:00Z", "by": "Sam Okafor", "severity": "high", "reason": "Inspection found a seized steering actuator"}
+      ]
+    },
+    {
+      "tail": "N106AW",
+      "reported": {"kind": "reported", "at": "2026-01-09T13:00:00Z", "by": "Lin Zhou", "severity": "high", "description": "Fuel quantity indication unreliable on the right tank"},
+      "later": [
+        {"kind": "scheduled", "at": "2026-01-09T14:00:00Z", "by": "Dee Park", "on": "2026-01-10"},
+        {"kind": "resolved", "at": "2026-01-10T16:00:00Z", "by": "Sam Okafor", "note": "Replaced the fuel probe"},
+        {"kind": "reopened", "at": "2026-01-15T08:00:00Z", "by": "Ana Reyes", "reason": "Indication dropped out again in cruise"}
+      ]
+    },
+    {
+      "tail": "N106AW",
+      "reported": {"kind": "reported", "at": "2026-01-11T10:00:00Z", "by": "Ana Reyes", "severity": "high", "description": "Propeller de-ice boot looks delaminated"},
+      "later": [
+        {"kind": "reclassified", "at": "2026-01-11T12:30:00Z", "by": "Sam Okafor", "severity": "medium", "reason": "Boot is intact; edge lift is cosmetic and within limits"},
+        {"kind": "scheduled", "at": "2026-01-11T13:00:00Z", "by": "Dee Park", "on": "2026-01-20"}
+      ]
+    },
+    {
+      "tail": "N106AW",
+      "reported": {"kind": "reported", "at": "2026-01-14T09:00:00Z", "by": "Ana Reyes", "severity": "low", "description": "Cabin PA handset cord frayed"},
+      "later": [
+        {"kind": "resolved", "at": "2026-01-14T09:30:00Z", "by": "Lin Zhou", "note": "Replaced the handset from stock"}
+      ]
+    }
+  ]
+}
