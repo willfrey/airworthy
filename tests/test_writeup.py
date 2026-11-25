@@ -16,6 +16,7 @@ from airworthy.writeup import (
     Resolved,
     Scheduled,
     Severity,
+    Standing,
     WriteUp,
     apply,
     known_at,
@@ -23,6 +24,7 @@ from airworthy.writeup import (
     needs_scheduling,
     opened,
     overdue,
+    standing,
 )
 
 if TYPE_CHECKING:
@@ -317,6 +319,24 @@ def test_a_resolved_write_up_is_not_overdue() -> None:
     state = _closed(Severity.LOW, resolved_at=0, as_of=0)
 
     assert not overdue(state, _at(60 * 24 * 30))
+
+
+# Where a write-up stands.
+
+
+@pytest.mark.parametrize(
+    ("state", "stands"),
+    [
+        (_closed(Severity.HIGH, resolved_at=0, as_of=0), Standing.RESOLVED),
+        (_open(Severity.HIGH, None, 0), Standing.WAITING),
+        (_open(Severity.HIGH, date(2026, 1, 9), 0), Standing.OVERDUE),
+        (_open(Severity.HIGH, date(2026, 1, 10), 0), Standing.SCHEDULED),
+    ],
+)
+def test_a_write_up_stands_in_exactly_one_place(
+    state: Open | Closed, stands: Standing
+) -> None:
+    assert standing(state, T0) is stands
 
 
 # What an event may hold.

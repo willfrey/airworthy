@@ -16,6 +16,9 @@ dependencies = [
     "uvicorn>=0.54.0",
 ]
 
+[project.scripts]
+airworthy = "airworthy.web:main"
+
 # The version comes from git tags: HEAD tagged `v1.2.0` builds 1.2.0, and any other
 # commit builds a development version past the last tag (1.2.1.dev3+g…).
 # The build requirements carry no version: uv.lock doesn't hold them, so a build takes
@@ -23,6 +26,10 @@ dependencies = [
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# FastAPI imports python-multipart to read a posted form; no module of ours does.
+[tool.deptry.per_rule_ignores]
+DEP002 = ["python-multipart"]
 
 [tool.hatch.version]
 source = "vcs"
@@ -353,7 +360,7 @@ exclude_type_checking_imports = true
 name = "layers"
 type = "layers"
 containers = ["airworthy"]
-layers = ["seed", "store", "fleet", "writeup", "(model)"]
+layers = ["web", "seed", "store", "fleet", "writeup", "(model)"]
 exhaustive = true
 
 # --- mutation testing -------------------------------------------------------------

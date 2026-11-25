@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} · Airworthy</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --bad: #c62828; --good: #2e7d32; --warn: #b26a00; }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 64rem; padding: 1rem; }
+  header a { font-weight: 700; text-decoration: none; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid var(--line); padding: .5rem; text-align: left; vertical-align: top; }
+  .grounded strong, .status.grounded { color: var(--bad); }
+  .cleared .state, .status.cleared { color: var(--good); }
+  .overdue { color: var(--warn); font-weight: 600; }
+  .problem { border: 1px solid var(--bad); color: var(--bad); padding: .5rem; }
+  article { border: 1px solid var(--line); border-radius: .5rem; margin: 1rem 0; padding: 0 1rem 1rem; }
+  form.action { display: inline-flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0; align-items: end; }
+  fieldset { border: 1px solid var(--line); border-radius: .5rem; margin: .5rem 0; }
+  label { display: inline-flex; flex-direction: column; font-size: .85rem; }
+  .history { color: color-mix(in srgb, currentColor 75%, transparent); font-size: .9rem; }
+</style>
+</head>
+<body>
+<header><a href="/">Airworthy</a></header>
+<main>
+{% block main %}{% endblock %}
+</main>
+</body>
+</html>

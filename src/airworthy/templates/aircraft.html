@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ row.aircraft.tail }}{% endblock %}
+{% block main %}
+{% set tail = row.aircraft.tail %}
+<h1>{{ tail }} <small>{{ row.aircraft.type }}</small></h1>
+{% if at %}
+<p>As it stood at {{ stamp(moment) }}. Nothing can be changed in a past view.
+  <a href="/aircraft/{{ tail }}">Back to now</a></p>
+{% endif %}
+<p id="status" class="status {{ "grounded" if row.grounding else "cleared" }}">
+  {% if row.grounding %}
+  Grounded by {% for write_up in row.grounding %}#{{ write_up.id }}{{ "" if loop.last else ", " }}{% endfor %}
+  {% else %}
+  Cleared to fly
+  {% endif %}
+</p>
+{% if problem %}<p class="problem" role="alert">{{ problem }}</p>{% endif %}
+
+{% for entry in row.entries %}
+{% set write_up = entry.write_up %}
+{% set state = entry.state %}
+<article id="write-up-{{ write_up.id }}">
+  <h2>#{{ write_up.id }} {{ write_up.reported.description }}</h2>
+  <p class="standing">{{ state.severity }} severity,
+    {% if entry.standing == "resolved" %}
+    resolved by {{ state.by }} at {{ stamp(state.at) }}: {{ state.note }}
+    {% elif entry.standing == "needs a repair date" %}
+    open, <span class="overdue">needs a repair date</span>
+    {% elif entry.standing == "overdue" %}
+    open, <span class="overdue">overdue</span>: repair was set for {{ state.scheduled_for }}
+    {% else %}
+    open, repair set for {{ state.scheduled_for }}
+    {% endif %}
+  </p>
+  <ol class="history">
+    <li>{{ stamp(write_up.reported.at) }} {{ write_up.reported.by }} reported it as {{ write_up.reported.severity }}</li>
+    {% for event in write_up.later %}
+    <li>{{ stamp(event.at) }} {{ event.by }}
+      {% if event.kind == "reclassified" %}changed the severity to {{ event.severity }}: {{ event.reason }}
+      {% elif event.kind == "scheduled" %}set the repair for {{ event.on }}
+      {% elif event.kind == "resolved" %}resolved it: {{ event.note }}
+      {% else %}reopened it: {{ event.reason }}
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% if not at %}
+  {% set events = "/write-ups/" ~ write_up.id ~ "/events" %}
+  {% if entry.standing != "resolved" %}
+  <form class="action" method="post" action="{{ events }}">
+    <input type="hidden" name="kind" value="scheduled">
+    <label>Repair date <input type="date" name="on" required></label>
+    <label>Your name <input name="by" required></label>
+    <button>Set the repair date</button>
+  </form>
+  <form class="action" method="post" action="{{ events }}">
+    <input type="hidden" name="kind" value="resolved">
+    <label>What was done <input name="note" required></label>
+    <label>Your name <input name="by" required></label>
+    <button>Resolve</button>
+  </form>
+  {% else %}
+  <form class="action" method="post" action="{{ events }}">
+    <input type="hidden" name="kind" value="reopened">
+    <label>Why it is back <input name="reason" required></label>
+    <label>Your name <input name="by" required></label>
+    <button>Reopen</button>
+  </form>
+  {% endif %}
+  <form class="action" method="post" action="{{ events }}">
+    <input type="hidden" name="kind" value="reclassified">
+    <label>Severity
+      <select name="severity" required>
+        <option value="" selected disabled>choose</option>
+        <option>high</option><option>medium</option><option>low</option>
+      </select>
+    </label>
+    <label>Reason for the change <input name="reason" required></label>
+    <label>Your name <input name="by" required></label>
+    <button>Change the severity</button>
+  </form>
+  {% endif %}
+</article>
+{% else %}
+<p>No write-ups{{ " by then" if at else "" }}.</p>
+{% endfor %}
+
+{% if not at %}
+<form method="post" action="/aircraft/{{ tail }}/write-ups">
+  <fieldset>
+    <legend>File a write-up</legend>
+    <p><label>What is wrong <textarea name="description" rows="2" cols="60" required></textarea></label></p>
+    <p>Severity (a high one grounds the aircraft until it is resolved):
+      <label><input type="radio" name="severity" value="high" required> high</label>
+      <label><input type="radio" name="severity" value="medium"> medium</label>
+      <label><input type="radio" name="severity" value="low"> low</label>
+    </p>
+    <p><label>Your name <input name="by" required></label></p>
+    <button>File the write-up</button>
+  </fieldset>
+</form>
+{% endif %}
+{% endblock %}

@@ -251,6 +251,26 @@ def latest(write_up: WriteUp) -> State:
     return state
 
 
+class Standing(StrEnum):
+    """Where a write-up stands on its way to repair, in the words a person reads."""
+
+    WAITING = "needs a repair date"
+    SCHEDULED = "scheduled"
+    OVERDUE = "overdue"
+    RESOLVED = "resolved"
+
+
+def standing(state: State, moment: datetime) -> Standing:
+    """Tell where a write-up in `state` stands at `moment`."""
+    if isinstance(state, Closed):
+        return Standing.RESOLVED
+    if needs_scheduling(state):
+        return Standing.WAITING
+    if overdue(state, moment):
+        return Standing.OVERDUE
+    return Standing.SCHEDULED
+
+
 def needs_scheduling(state: State) -> bool:
     """Tell whether a write-up is open with no repair date."""
     return isinstance(state, Open) and state.scheduled_for is None
