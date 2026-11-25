@@ -1,0 +1,52 @@
+# Decisions
+
+Sections 2–5 (what I built, what I left out, what comes next, and how I used AI) land
+with the last pull request. This section was settled before any application code was
+written.
+
+## 1. Questions I would have asked the product manager, and my answers
+
+The brief's two rules are taken as written: a high-severity write-up grounds its
+aircraft until it is fixed, and every write-up needs a repair date. Everything below is
+a place where the brief doesn't say, and the call I made.
+
+| # | Question | My answer |
+|---|---|---|
+| 1 | Does "shows at any moment" mean now, or any past time too? | Now, first: the board is always current. Past times too: each write-up is an append-only log of events, folded to its state at a time t, so the board can be read as of any earlier moment. A past view goes by when an event was recorded, not when the defect appeared: a crack noticed at 09:00 and written up at 11:00 shows the aircraft cleared at 10:00. |
+| 2 | Must a write-up be scheduled when it is filed? | No. Unscheduled is a state, listed in a "needs scheduling" queue. I read "every issue needs to be scheduled" as an obligation the app tracks, not a condition of filing: refusing a report because nobody knows the repair slot yet would lose the report. |
+| 3 | Can a write-up be resolved without being scheduled first? | Yes. A mechanic who fixes a reading light on the spot shouldn't have to invent a date first. This is the one answer that goes against the brief's literal words. Scheduling exists so nothing open is forgotten, and a resolved write-up has nothing left to forget. |
+| 4 | Can severity change after filing? | Yes, as an event that requires a written reason. Raising to high grounds the aircraft at once; lowering from high releases it. Lowering is the one way an aircraft is released without a fix, so the history shows who did it, when and why. |
+| 5 | Can a resolved write-up be reopened? | Yes, as an event with a reason. A reopened high grounds the aircraft again. |
+| 6 | Who signs off a repair? | The person resolving it, by name. There is no second inspector, which real airlines require for some work. |
+| 7 | Authentication and roles? | None. The forms offer the seeded people's names, and any non-blank name is accepted. Every "who" in the history is therefore a claim, not a verified identity. |
+| 8 | Overdue repairs? | A repair date in the past is flagged. Deferral limits from a minimum equipment list are out of scope. |
+| 9 | Do medium and low ever ground an aircraft? | Never. |
+| 10 | Should AI suggest a severity? | Only as a suggestion, if it is built at all (it is a stretch goal): a person always picks the severity, picking lower than the suggestion warns and records both, and the feature is off without an API key. No model output can set the severity that grounds an aircraft. |
+| 11 | Which clock decides "overdue" and reads a past time? | Event times are UTC instants from the server clock. "Overdue" compares the repair date with today's date in UTC, a named constant; a real airline would use its base's time zone. A past time given without a zone is read as UTC, and the page says so. |
+| 12 | What if two people act on one write-up at once? | The second action is checked against the result of the first. Resolving twice is refused, not recorded twice. |
+| 13 | Can a resolved write-up be scheduled, or resolved again? | No. Both are refused until it is reopened, which also settles a schedule that races a resolve. |
+| 14 | Can severity be corrected on a resolved write-up? | Yes. It grounds nothing while resolved; a later reopen grounds, or not, at the corrected severity. |
+| 15 | Does a reopened write-up keep its repair date? | No. It reopens unscheduled, back in the "needs scheduling" queue. |
+| 16 | Can an open write-up be rescheduled, or scheduled for a past date? | Yes to both. A new date replaces the old one, and a past date shows as overdue at once. Refusing a past date would need a "today", and UTC's today is the wrong day for someone scheduling on a US evening. |
+| 17 | In a past view, overdue against which day? | The viewed moment's UTC date, so a past view shows what was overdue then. |
+| 18 | Could a plain-language question box change anything, or be the record? | No to both, if it is built at all (a stretch goal). Its tools only read, and its answer is marked as generated, with the board as the record. |
+| 19 | What happens to a write-up filed in error, such as one against the wrong aircraft? | Not built. The honest tool is a withdrawal event, which I would add next. Until then: lower its severity with a reason, then resolve it with a note saying it was filed in error. |
+
+### Where the build departs from the plan
+
+`docs/build-plan.md` is the plan I prepared before the clock started, committed as it
+stood. At the start of the session I had the coding agent review it against the brief,
+and I accepted four changes:
+
+- **A severity change requires a reason** (call 4). The plan recorded only who and when.
+- **The record of an AI suggestion is added with the suggestion feature**, not in the
+  core and the sample data ahead of it. Built the plan's way, cutting the feature would
+  leave the demo showing AI suggestions that nothing in the app can produce.
+- **The property test that later events never change a past view moves up**, into the
+  airworthiness stage, ahead of both AI features. It is what makes call 1's past view
+  trustworthy.
+- **The README's run instructions land with the web stage**, the first commit at which
+  the app can be run, and are finished in the last one.
+
+Call 19 was added in the same review; the plan had no answer for a write-up filed in
+error.
