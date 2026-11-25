@@ -8,8 +8,9 @@ from hypothesis import given, strategies as st
 
 from airworthy.fleet import Cleared, Grounded, status_at
 from airworthy.writeup import (
+    Closed,
+    Open,
     Reclassified,
-    RefusedError,
     Reopened,
     Reported,
     Resolved,
@@ -40,8 +41,18 @@ def _write_up(number: int, severity: Severity, *later: FollowUp) -> WriteUp:
     return WriteUp(id=number, tail="N101AW", reported=reported, later=later)
 
 
+def _reclassified(severity: Severity, minutes: int) -> Reclassified:
+    return Reclassified(
+        at=_at(minutes), by="Lin Zhou", severity=severity, reason="Measured the crack"
+    )
+
+
 def _resolved(minutes: int) -> Resolved:
     return Resolved(at=_at(minutes), by="Sam Okafor", note="Replaced the pane")
+
+
+def _reopened(minutes: int) -> Reopened:
+    return Reopened(at=_at(minutes), by="Ana Reyes", reason="Crack is back")
 
 
 def _grounding(status: Status) -> list[int]:
@@ -92,48 +103,82 @@ def test_an_aircraft_is_cleared_before_its_high_was_reported() -> None:
     assert status_at([high], _at(-1)) == Cleared()
 
 
-# The laws, over generated histories. Candidate follow-ups are drawn freely and kept
-# only when `apply` accepts them, so every generated log is one the app could hold.
+def test_a_past_answer_names_the_write_up_as_it_was_known_then() -> None:
+    """Asked about minute 5, the answer must not carry the resolve of minute 10."""
+    fixed_later = _write_up(1, Severity.HIGH, _resolved(10))
 
-_instants: Final = st.integers(0, 20).map(_at)
-_names: Final = st.just("Sam Okafor")
-_texts: Final = st.just("Noted on the walk-round")
-_follow_ups: Final = st.one_of(
-    st.builds(
-        Reclassified,
-        at=_instants,
-        by=_names,
-        severity=st.sampled_from(Severity),
-        reason=_texts,
-    ),
-    st.builds(Scheduled, at=_instants, by=_names, on=st.just(date(2026, 1, 12))),
-    st.builds(Resolved, at=_instants, by=_names, note=_texts),
-    st.builds(Reopened, at=_instants, by=_names, reason=_texts),
-)
-_reports: Final = st.builds(
-    Reported,
-    at=_instants,
-    by=_names,
-    severity=st.sampled_from(Severity),
-    description=_texts,
-)
+    status = status_at([fixed_later], _at(5))
+
+    assert status == Grounded(by=(_write_up(1, Severity.HIGH),))
+
+
+def test_a_high_lowered_while_resolved_does_not_ground_when_reopened() -> None:
+    log = _write_up(
+        1,
+        Severity.HIGH,
+        _resolved(5),
+        _reclassified(Severity.MEDIUM, 10),
+        _reopened(15),
+    )
+
+    assert status_at([log], _at(15)) == Cleared()
+
+
+def test_a_low_raised_to_high_while_resolved_grounds_when_reopened() -> None:
+    log = _write_up(
+        1, Severity.LOW, _resolved(5), _reclassified(Severity.HIGH, 10), _reopened(15)
+    )
+
+    assert status_at([log], _at(14)) == Cleared()
+    assert status_at([log], _at(15)) == Grounded(by=(log,))
+
+
+# The laws, over generated histories. Each follow-up is drawn from the moves the
+# transition table allows in the state reached so far, a few minutes after the last
+# one or at the same instant, so `apply` refusing one fails the test.
+
+_NAMES: Final = st.just("Sam Okafor")
+_TEXTS: Final = st.just("Noted on the walk-round")
+_SEVERITIES: Final = st.sampled_from(list(Severity))
+_MOMENTS: Final = st.integers(-1, 40).map(_at)
+
+
+def _moves(state: State, at: datetime) -> st.SearchStrategy[FollowUp]:
+    """Give the follow-ups the table allows on a state, dated `at`."""
+    moment = st.just(at)
+    reclassified = st.builds(
+        Reclassified, at=moment, by=_NAMES, severity=_SEVERITIES, reason=_TEXTS
+    )
+    match state:
+        case Open():
+            return st.one_of(
+                reclassified,
+                st.builds(
+                    Scheduled, at=moment, by=_NAMES, on=st.just(date(2026, 1, 12))
+                ),
+                st.builds(Resolved, at=moment, by=_NAMES, note=_TEXTS),
+            )
+        case Closed():
+            return st.one_of(
+                reclassified, st.builds(Reopened, at=moment, by=_NAMES, reason=_TEXTS)
+            )
 
 
 @st.composite
 def _histories(draw: st.DrawFn) -> list[WriteUp]:
-    """Draw one aircraft's write-ups, each a log `apply` accepts, with distinct ids."""
+    """Draw one aircraft's write-ups, each a log of allowed moves, with distinct ids."""
     write_ups: list[WriteUp] = []
-    for number, reported in enumerate(draw(st.lists(_reports, max_size=4))):
-        candidates = sorted(
-            draw(st.lists(_follow_ups, max_size=8)), key=lambda event: event.at
+    for number in range(draw(st.integers(0, 3))):
+        minute = draw(st.integers(0, 10))
+        reported = Reported(
+            at=_at(minute), by="Ana Reyes", severity=draw(_SEVERITIES), description="x"
         )
         state: State = opened(reported)
         later: list[FollowUp] = []
-        for event in candidates:
-            try:
-                state = apply(state, event)
-            except RefusedError:
-                continue
+        for _ in range(draw(st.integers(0, 8))):
+            minute += draw(st.integers(0, 3))
+            event = draw(_moves(state, _at(minute)))
+            state = apply(state, event)
             later.append(event)
         write_ups.append(
             WriteUp(id=number, tail="N101AW", reported=reported, later=tuple(later))
@@ -141,8 +186,17 @@ def _histories(draw: st.DrawFn) -> list[WriteUp]:
     return write_ups
 
 
-# This calls neither `state_at` nor `Severity.grounds`, so the property below compares
-# the code with an answer the code did not help produce.
+def _cut_by_hand(write_up: WriteUp, t: datetime) -> WriteUp:
+    return WriteUp(
+        id=write_up.id,
+        tail=write_up.tail,
+        reported=write_up.reported,
+        later=tuple(event for event in write_up.later if event.at <= t),
+    )
+
+
+# This calls neither `known_at`, `latest` nor `Severity.grounds`, so the property below
+# compares the code with an answer the code did not help produce.
 def _grounds_by_hand(write_up: WriteUp, t: datetime) -> bool:
     """Work out from the raw events alone whether a write-up grounds at `t`."""
     if write_up.reported.at > t:
@@ -157,7 +211,7 @@ def _grounds_by_hand(write_up: WriteUp, t: datetime) -> bool:
     return is_open and severities[-1] is Severity.HIGH
 
 
-@given(write_ups=_histories(), t=_instants)
+@given(write_ups=_histories(), t=_MOMENTS)
 def test_an_aircraft_is_grounded_exactly_by_its_open_highs(
     write_ups: list[WriteUp], t: datetime
 ) -> None:
@@ -166,20 +220,15 @@ def test_an_aircraft_is_grounded_exactly_by_its_open_highs(
     assert _grounding(status_at(write_ups, t)) == expected
 
 
-@given(write_ups=_histories(), t=_instants)
+@given(write_ups=_histories(), t=_MOMENTS)
 def test_events_after_a_moment_never_change_the_status_at_it(
     write_ups: list[WriteUp], t: datetime
 ) -> None:
-    """A past view is trustworthy only if nothing recorded later can alter it."""
-    known_then = [
-        WriteUp(
-            id=w.id,
-            tail=w.tail,
-            reported=w.reported,
-            later=tuple(event for event in w.later if event.at <= t),
-        )
-        for w in write_ups
-        if w.reported.at <= t
-    ]
+    """A past view is trustworthy only if nothing recorded later can alter it.
 
-    assert _grounding(status_at(write_ups, t)) == _grounding(status_at(known_then, t))
+    The whole answer is compared, the grounding write-ups' logs included, against the
+    answer from logs cut by hand to what had been recorded by then.
+    """
+    known_then = [_cut_by_hand(w, t) for w in write_ups if w.reported.at <= t]
+
+    assert status_at(write_ups, t) == status_at(known_then, t)

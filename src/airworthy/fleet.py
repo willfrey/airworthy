@@ -8,7 +8,7 @@ stored nowhere.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from airworthy.writeup import Open, state_at
+from airworthy.writeup import Open, known_at, latest
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -27,7 +27,11 @@ class Grounded:
     """An aircraft that may not fly, and the write-ups that say so."""
 
     by: tuple[WriteUp, *tuple[WriteUp, ...]]
-    """Every open write-up that grounds the aircraft, in the order given."""
+    """Every open write-up that grounds the aircraft, in the order given.
+
+    Each is the write-up as it was known at the moment asked about, so a past answer
+    holds nothing recorded later.
+    """
 
 
 type Status = Cleared | Grounded
@@ -42,15 +46,18 @@ def status_at(write_ups: Iterable[WriteUp], t: datetime) -> Status:
 
     Returns:
         `Grounded` by each write-up that is open at `t` with a severity that grounds,
-        or `Cleared` when there is none.
+        each cut to what was known at `t`, or `Cleared` when there is none.
     """
-    match [write_up for write_up in write_ups if _grounds_at(write_up, t)]:
+    known = (known_at(write_up, t) for write_up in write_ups)
+    match [
+        write_up for write_up in known if write_up is not None and _grounds(write_up)
+    ]:
         case [first, *rest]:
             return Grounded(by=(first, *rest))
         case _:
             return Cleared()
 
 
-def _grounds_at(write_up: WriteUp, t: datetime) -> bool:
-    state = state_at(write_up, t)
+def _grounds(write_up: WriteUp) -> bool:
+    state = latest(write_up)
     return isinstance(state, Open) and state.severity.grounds
