@@ -346,7 +346,7 @@ exclude_type_checking_imports = true
 name = "layers"
 type = "layers"
 containers = ["airworthy"]
-layers = ["(model)"]
+layers = ["writeup", "(model)"]
 exhaustive = true
 
 # --- mutation testing -------------------------------------------------------------

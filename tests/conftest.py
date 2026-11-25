@@ -4,10 +4,15 @@ The surfaces are registered here, the one place they are listed.
 
 Also gives a session a temporary root of its own when `basetemp_per_session` is on,
 as pyproject.toml's [tool.mutmut] sets it for mutmut's parallel sessions.
+
+And runs the suite in a time zone that is not UTC, so code that reads the machine's
+zone where it should read UTC lands on another day and fails a test.
 """
 
+import os
 import shutil
 import tempfile
+import time
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -24,6 +29,9 @@ SURFACE_MARKERS: Final[Mapping[str, str]] = {
     "smoke": "end-to-end check of the installed package or its public API",
 }
 
+# Nine hours ahead of UTC all year: a different calendar day for nine hours in every 24.
+SUITE_TIME_ZONE: Final = "Asia/Tokyo"
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the `basetemp_per_session` ini option."""
@@ -36,13 +44,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the surface markers, and apply `basetemp_per_session`.
+    """Set the suite's time zone, register the markers, apply `basetemp_per_session`.
 
     With `basetemp_per_session` on, the session gets its own `--basetemp`: sessions
     that share pytest's temporary root race each other's cleanup of it, which fails a
     session no test failed. A conftest's hook runs before the builtin tmpdir plugin's,
     which reads `--basetemp`.
     """
+    os.environ["TZ"] = SUITE_TIME_ZONE
+    time.tzset()
     for name, promise in SURFACE_MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {promise}")
     if config.getini("basetemp_per_session"):
