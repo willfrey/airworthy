@@ -52,7 +52,7 @@ error.
 
 ## 2. What I built
 
-A server-rendered web app (FastAPI and Jinja2 over SQLite) in five pull requests, each with its checks and mutation testing green in CI before it merged:
+A server-rendered web app (FastAPI and Jinja2 over SQLite) in six pull requests, each with its checks and mutation testing green in CI before it merged:
 
 | PR | What it added |
 |---|---|
@@ -61,6 +61,7 @@ A server-rendered web app (FastAPI and Jinja2 over SQLite) in five pull requests
 | #5 | `store.py`: the events in SQLite, each action checked against the latest state inside one write transaction, so two people resolving at once record one resolution. The sample fleet is data (`seed.json`), loaded through the same rules as a person's actions. |
 | #6 | `web.py` and the pages: the board, each aircraft's page with its history and actions, and both as they stood at any past moment. |
 | #7 | `triage.py`: an optional severity suggestion from a model, recorded beside the severity the person picked. |
+| #9 | A stylesheet for the pages: status as badges, a write-up's history as a timeline, light and dark. No script and no build step. |
 
 Three choices carry most of the weight:
 
@@ -151,6 +152,9 @@ tests and these documents in one session, whose log is submitted with this. What
   separate agent runs that see the code and not the author's reasoning; a second
   review after any severe finding; merge only after that.
 - I corrected lint and typing problems I saw as it worked.
+- With about half an hour left I asked for a better-looking frontend. The pages
+  already existed, so the agent restyled them (#9) and checked the result from
+  headless-browser screenshots in both color schemes.
 
 What the reviews changed, since that is where the agent's first drafts were wrong:
 
