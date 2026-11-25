@@ -5,20 +5,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{% endblock %} · Airworthy</title>
 <style>
-  :root { color-scheme: light dark; --line: #8884; --bad: #c62828; --good: #2e7d32; --warn: #b26a00; }
-  body { font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 64rem; padding: 1rem; }
-  header a { font-weight: 700; text-decoration: none; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border-bottom: 1px solid var(--line); padding: .5rem; text-align: left; vertical-align: top; }
-  .grounded strong, .status.grounded { color: var(--bad); }
-  .cleared .state, .status.cleared { color: var(--good); }
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#1b1f24, #e8eaed);
+    --soft: light-dark(#57606a, #a3abb5);
+    --page: light-dark(#f6f7f9, #101214);
+    --card: light-dark(#ffffff, #191c20);
+    --line: light-dark(#d5d9de, #30353c);
+    --link: light-dark(#0b57d0, #8ab4f8);
+    --bad: light-dark(#b3261e, #ff8f86);
+    --bad-bg: light-dark(#fdeceb, #3a1c1a);
+    --good: light-dark(#1b6e2c, #7ad68a);
+    --good-bg: light-dark(#e8f5ea, #16301c);
+    --warn: light-dark(#8a5300, #f2b866);
+    --warn-bg: light-dark(#fff4e0, #33260f);
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--page); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; margin: 0; }
+  a { color: var(--link); }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: .75rem 1.5rem; }
+  header a { color: var(--ink); font-size: 1.1rem; font-weight: 700; letter-spacing: .02em; text-decoration: none; }
+  main { margin: 0 auto; max-width: 68rem; padding: 1rem 1.5rem 3rem; }
+  h1 { font-size: 1.75rem; margin: 1rem 0; }
+  h1 small { color: var(--soft); font-size: 1rem; font-weight: 400; margin-left: .5rem; }
+  h2 { font-size: 1.15rem; margin: 1rem 0 .25rem; }
+  #summary { font-size: 1.1rem; font-weight: 600; }
+
+  table { background: var(--card); border: 1px solid var(--line); border-collapse: separate; border-radius: .5rem; border-spacing: 0; overflow: hidden; width: 100%; }
+  th, td { border-bottom: 1px solid var(--line); padding: .6rem .75rem; text-align: left; vertical-align: top; }
+  th { color: var(--soft); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tr.grounded td:first-child { box-shadow: inset 4px 0 var(--bad); }
+  tr.cleared td:first-child { box-shadow: inset 4px 0 var(--good); }
+  td:first-child a { font-weight: 600; }
+  .grounded .state strong { background: var(--bad-bg); border-radius: 1rem; color: var(--bad); padding: .1rem .6rem; }
+  .cleared .state { color: var(--good); font-weight: 600; }
+  .status { border-radius: .5rem; display: inline-block; font-weight: 600; margin: 0 0 .5rem; padding: .4rem .9rem; }
+  .status.grounded { background: var(--bad-bg); color: var(--bad); }
+  .status.cleared { background: var(--good-bg); color: var(--good); }
   .overdue { color: var(--warn); font-weight: 600; }
-  .problem { border: 1px solid var(--bad); color: var(--bad); padding: .5rem; }
-  article { border: 1px solid var(--line); border-radius: .5rem; margin: 1rem 0; padding: 0 1rem 1rem; }
-  form.action { display: inline-flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0; align-items: end; }
-  fieldset { border: 1px solid var(--line); border-radius: .5rem; margin: .5rem 0; }
-  label { display: inline-flex; flex-direction: column; font-size: .85rem; }
-  .history { color: color-mix(in srgb, currentColor 75%, transparent); font-size: .9rem; }
+  .problem { background: var(--bad-bg); border: 1px solid var(--bad); border-radius: .5rem; color: var(--bad); padding: .6rem .9rem; }
+
+  article { background: var(--card); border: 1px solid var(--line); border-radius: .5rem; margin: 1rem 0; padding: .25rem 1.25rem 1rem; }
+  .standing { margin: 0 0 .5rem; }
+  .standing.overdue { background: var(--warn-bg); border-radius: .4rem; display: inline-block; padding: .15rem .6rem; }
+  .history { border-left: 2px solid var(--line); color: var(--soft); font-size: .9rem; list-style: none; margin: .5rem 0 1rem; padding: 0 0 0 1rem; }
+  .history li { margin: .2rem 0; }
+
+  form { margin: 0; }
+  form.action { align-items: end; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: .5rem .75rem; padding: .6rem 0 .1rem; }
+  form[method="get"] { align-items: end; display: flex; flex-wrap: wrap; gap: .75rem; margin: 0 0 1rem; }
+  form.action label:has(input[name="note"]), form.action label:has(input[name="reason"]) { flex: 0 1 24rem; }
+  form.action label:has(input[name="note"]) input, form.action label:has(input[name="reason"]) input { width: 100%; }
+  fieldset { background: var(--card); border: 1px solid var(--line); border-radius: .5rem; margin: 1.5rem 0 0; padding: .5rem 1.25rem 1rem; }
+  legend { font-weight: 700; padding: 0 .4rem; }
+  label { color: var(--soft); display: inline-flex; flex-direction: column; font-size: .8rem; gap: .15rem; }
+  label:has(input[type="radio"]) { align-items: center; color: var(--ink); flex-direction: row; font-size: 1rem; gap: .3rem; margin-left: .75rem; }
+  input, select, textarea { background: var(--page); border: 1px solid var(--line); border-radius: .35rem; color: var(--ink); font: inherit; padding: .3rem .5rem; }
+  textarea { max-width: 100%; }
+  button { background: var(--link); border: 0; border-radius: .35rem; color: var(--page); cursor: pointer; font: inherit; font-weight: 600; padding: .35rem .9rem; }
+  button[formnovalidate] { background: transparent; border: 1px solid var(--link); color: var(--link); margin-left: .5rem; }
+  :focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  details { color: var(--soft); margin: 0 0 .5rem; }
 </style>
 </head>
 <body>
