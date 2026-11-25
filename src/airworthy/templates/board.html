@@ -10,6 +10,19 @@
   <button>Show</button>
   {% if at %}<a href="/">Back to now</a>{% endif %}
 </form>
+{% if problem %}<p class="problem" role="alert">{{ problem.text }}</p>{% endif %}
+{% if asks and not at %}
+<form method="post" action="/questions">
+  <label>Ask about the fleet
+    <input name="question" size="60" value="{{ asked.question if asked else "" }}" required>
+  </label>
+  <button>Ask</button>
+</form>
+{% if asked and asked.answer is not none %}
+<p id="answer">{{ asked.answer }}
+  <small>A model wrote this answer from the records. The board below is the record.</small></p>
+{% endif %}
+{% endif %}
 <p id="summary">{{ "As it stood at" if at else "Now," }} {{ stamp(moment) }}:
   {{ rows|rejectattr("grounding")|list|length }} of {{ rows|length }} aircraft cleared to fly.</p>
 <table>

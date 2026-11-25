@@ -17,14 +17,15 @@ log to what was known at a moment.
 from dataclasses import dataclass, replace
 from datetime import UTC, date
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, assert_never
+from typing import Annotated, Literal, assert_never
+
+# A schema is built from `Open` and `Closed` (`airworthy.ops` returns them from a
+# tool), which reads their annotations, so this name must exist at run time.
+lazy from datetime import datetime
 
 from pydantic import AwareDatetime, Field, StringConstraints
 
 from airworthy.model import Model
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 type Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 """Text a person wrote: stripped, and never blank."""

@@ -361,7 +361,7 @@ exclude_type_checking_imports = true
 name = "layers"
 type = "layers"
 containers = ["airworthy"]
-layers = ["web", "seed", "triage | store", "fleet", "writeup", "(model)"]
+layers = ["web", "seed", "ops | triage | store", "fleet", "writeup", "(model)"]
 exhaustive = true
 
 # --- mutation testing -------------------------------------------------------------

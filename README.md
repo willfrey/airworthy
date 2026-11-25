@@ -32,6 +32,16 @@ Without a key the button is absent and everything else works the same. The sampl
 fleet's N105AW carries a recorded suggestion, so the marking is visible either way.
 Each suggestion is one model call of a few hundred tokens.
 
+### Questions about the fleet (optional)
+
+With the same key, the board gains an "Ask about the fleet" box. A question in plain
+words ("Which aircraft can fly?", "What is grounding N104AW?", "Which aircraft were
+grounded at noon yesterday?") goes to Claude with three tools: the fleet's status now
+or at a past moment, one aircraft's write-ups, and the current time. Every tool reads
+and none can change anything. The answer appears above the board, marked as a
+model's; the board stays the record. A question costs one model call for each round of
+reads and one for the answer.
+
 ## A walk through the sample fleet
 
 The board at `/` is the answer to "which aircraft can fly right now". On a fresh start

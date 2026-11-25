@@ -13,11 +13,13 @@ from pydantic import StringConstraints
 from airworthy.model import Model
 from airworthy.writeup import Open, known_at, latest
 
+# A schema is built from `Grounded` (`airworthy.ops` returns it from a tool), which
+# reads its annotations, so this name must exist at run time.
+lazy from airworthy.writeup import WriteUp
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from datetime import datetime
-
-    from airworthy.writeup import WriteUp
 
 
 class Aircraft(Model):
