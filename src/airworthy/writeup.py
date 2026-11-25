@@ -16,8 +16,8 @@ log to what was known at a moment.
 
 from dataclasses import dataclass, replace
 from datetime import UTC, date
-from enum import Enum, StrEnum, auto
-from typing import TYPE_CHECKING, Annotated, Final, Literal, assert_never
+from enum import StrEnum
+from typing import TYPE_CHECKING, Annotated, Literal, assert_never
 
 from pydantic import AwareDatetime, Field, StringConstraints
 
@@ -64,6 +64,18 @@ class Reported(Event):
     description: Text
 
 
+class Kind(StrEnum):
+    """The kinds of follow-up, in the order a page offers them.
+
+    Each follow-up names its member as its `kind`, which is what its JSON holds.
+    """
+
+    SCHEDULED = "scheduled"
+    RESOLVED = "resolved"
+    REOPENED = "reopened"
+    RECLASSIFIED = "reclassified"
+
+
 class Reclassified(Event):
     """A correction of the severity, with the reason for it.
 
@@ -71,7 +83,7 @@ class Reclassified(Event):
     why the reason is required.
     """
 
-    kind: Literal["reclassified"] = "reclassified"
+    kind: Literal[Kind.RECLASSIFIED] = Kind.RECLASSIFIED
     severity: Severity
     reason: Text
 
@@ -79,21 +91,21 @@ class Reclassified(Event):
 class Scheduled(Event):
     """A repair date, replacing any earlier one."""
 
-    kind: Literal["scheduled"] = "scheduled"
+    kind: Literal[Kind.SCHEDULED] = Kind.SCHEDULED
     on: date
 
 
 class Resolved(Event):
     """The repair, signed off by the person who did it."""
 
-    kind: Literal["resolved"] = "resolved"
+    kind: Literal[Kind.RESOLVED] = Kind.RESOLVED
     note: Text
 
 
 class Reopened(Event):
     """A resolved defect that came back: "resolved" is deliberately not forever."""
 
-    kind: Literal["reopened"] = "reopened"
+    kind: Literal[Kind.REOPENED] = Kind.REOPENED
     reason: Text
 
 
@@ -101,12 +113,6 @@ type FollowUp = Annotated[
     Reclassified | Scheduled | Resolved | Reopened, Field(discriminator="kind")
 ]
 """An event on a write-up that its report already opened, told apart by `kind`."""
-
-type Kind = Literal["scheduled", "resolved", "reopened", "reclassified"]
-"""The `kind` of a follow-up."""
-
-KINDS: Final[tuple[Kind, ...]] = ("scheduled", "resolved", "reopened", "reclassified")
-"""Every kind of follow-up, in the order a page offers them."""
 
 
 class WriteUp(Model):
@@ -171,9 +177,9 @@ def refusal(state: State, kind: Kind) -> str | None:
 
 def _refusal_on_open(kind: Kind) -> str | None:
     match kind:
-        case "reopened":
+        case Kind.REOPENED:
             return "this write-up is already open"
-        case "reclassified" | "scheduled" | "resolved":
+        case Kind.RECLASSIFIED | Kind.SCHEDULED | Kind.RESOLVED:
             return None
         case unreachable:
             assert_never(unreachable)
@@ -181,19 +187,19 @@ def _refusal_on_open(kind: Kind) -> str | None:
 
 def _refusal_on_closed(kind: Kind) -> str | None:
     match kind:
-        case "scheduled":
+        case Kind.SCHEDULED:
             return "a resolved write-up can't be scheduled; reopen it first"
-        case "resolved":
+        case Kind.RESOLVED:
             return "this write-up is already resolved"
-        case "reclassified" | "reopened":
+        case Kind.RECLASSIFIED | Kind.REOPENED:
             return None
         case unreachable:
             assert_never(unreachable)
 
 
 def allowed(state: State) -> tuple[Kind, ...]:
-    """Name the kinds of follow-up `apply` accepts on a state, in `KINDS`' order."""
-    return tuple(kind for kind in KINDS if refusal(state, kind) is None)
+    """Name the kinds of follow-up `apply` accepts on a state, in `Kind`'s order."""
+    return tuple(kind for kind in Kind if refusal(state, kind) is None)
 
 
 def apply(state: State, event: FollowUp) -> State:
@@ -268,39 +274,37 @@ def latest(write_up: WriteUp) -> State:
     return state
 
 
-class Standing(Enum):
-    """Where a write-up stands on its way to repair."""
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Waiting:
+    """An open write-up with no repair date."""
 
-    WAITING = auto()
-    """Open, with no repair date."""
-    SCHEDULED = auto()
-    OVERDUE = auto()
-    RESOLVED = auto()
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Due:
+    """An open write-up whose repair date has not passed."""
+
+    on: date
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Overdue:
+    """An open write-up whose repair date is before the moment's UTC day."""
+
+    on: date
+
+
+type Standing = Waiting | Due | Overdue | Closed
+"""Where a write-up stands on its way to repair; a resolved one stands as its state."""
 
 
 def standing(state: State, moment: datetime) -> Standing:
     """Tell where a write-up in `state` stands at `moment`."""
     if isinstance(state, Closed):
-        return Standing.RESOLVED
-    if needs_scheduling(state):
-        return Standing.WAITING
-    if overdue(state, moment):
-        return Standing.OVERDUE
-    return Standing.SCHEDULED
-
-
-def needs_scheduling(state: State) -> bool:
-    """Tell whether a write-up is open with no repair date."""
-    return isinstance(state, Open) and state.scheduled_for is None
-
-
-def overdue(state: State, moment: datetime) -> bool:
-    """Tell whether a write-up is open with a repair date before `moment`'s UTC day."""
-    return (
-        isinstance(state, Open)
-        and state.scheduled_for is not None
-        and state.scheduled_for < utc_day(moment)
-    )
+        return state
+    on = state.scheduled_for
+    if on is None:
+        return Waiting()
+    return Overdue(on=on) if on < utc_day(moment) else Due(on=on)
 
 
 def utc_day(moment: datetime) -> date:

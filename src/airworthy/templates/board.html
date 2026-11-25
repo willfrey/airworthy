@@ -30,9 +30,9 @@
     Cleared to fly
     {% endif %}
   </td>
-  <td>{{ row.entries|rejectattr("standing", "equalto", Standing.RESOLVED)|list|length }} open</td>
-  <td>{% for entry in row.entries if entry.standing == Standing.WAITING %}#{{ entry.write_up.id }} {% else %}none{% endfor %}</td>
-  <td class="overdue">{% for entry in row.entries if entry.standing == Standing.OVERDUE %}#{{ entry.write_up.id }} {% else %}none{% endfor %}</td>
+  <td>{{ row.open }} open</td>
+  <td>{% for id in row.waiting %}#{{ id }} {% else %}none{% endfor %}</td>
+  <td class="overdue">{% for id in row.overdue %}#{{ id }} {% else %}none{% endfor %}</td>
 </tr>
 {% endfor %}
 </tbody>

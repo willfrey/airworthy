@@ -8,7 +8,7 @@ import pytest
 from airworthy import seed
 from airworthy.fleet import Aircraft, Cleared, Grounded, status_at
 from airworthy.store import Store
-from airworthy.writeup import Open, latest, needs_scheduling, overdue
+from airworthy.writeup import Open, Overdue, Waiting, latest, standing
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,13 +78,15 @@ def test_the_sample_fleet_was_different_two_days_earlier(store: Store) -> None:
 def test_the_sample_fleet_has_two_write_ups_waiting_for_a_repair_date(
     store: Store,
 ) -> None:
-    waiting = [w.id for w in store.write_ups() if needs_scheduling(latest(w))]
+    waiting = [w.id for w in store.write_ups() if standing(latest(w), NOW) == Waiting()]
 
     assert waiting == [6, 8]
 
 
 def test_the_sample_fleet_has_one_overdue_repair(store: Store) -> None:
-    late = [w.id for w in store.write_ups() if overdue(latest(w), NOW)]
+    late = [
+        w.id for w in store.write_ups() if isinstance(standing(latest(w), NOW), Overdue)
+    ]
 
     assert late == [4]
 

@@ -8,7 +8,10 @@ from pydantic import ValidationError
 
 from airworthy.writeup import (
     Closed,
+    Due,
+    Kind,
     Open,
+    Overdue,
     Reclassified,
     RefusedError,
     Reopened,
@@ -16,15 +19,13 @@ from airworthy.writeup import (
     Resolved,
     Scheduled,
     Severity,
-    Standing,
+    Waiting,
     WriteUp,
     allowed,
     apply,
     known_at,
     latest,
-    needs_scheduling,
     opened,
-    overdue,
     standing,
 )
 
@@ -279,19 +280,14 @@ def test_a_log_holding_a_refused_follow_up_fails_at_every_moment_read(
         _ = known_at(log, _at(minutes))
 
 
-# Facts about one state.
+# Where a write-up stands.
 
 
-def test_an_open_write_up_with_no_repair_date_needs_scheduling() -> None:
-    assert needs_scheduling(_open(Severity.LOW, None, 0))
+def test_an_open_write_up_with_no_repair_date_is_waiting_at_any_moment() -> None:
+    state = _open(Severity.LOW, None, 0)
 
-
-def test_an_open_write_up_with_a_repair_date_does_not_need_scheduling() -> None:
-    assert not needs_scheduling(_open(Severity.LOW, REPAIR_DAY, 0))
-
-
-def test_a_resolved_write_up_does_not_need_scheduling() -> None:
-    assert not needs_scheduling(_closed(Severity.LOW, resolved_at=0, as_of=0))
+    assert standing(state, _at(0)) == Waiting()
+    assert standing(state, _at(60 * 24 * 30)) == Waiting()
 
 
 @pytest.mark.parametrize(
@@ -309,35 +305,15 @@ def test_a_resolved_write_up_does_not_need_scheduling() -> None:
 def test_an_open_write_up_is_overdue_once_its_repair_date_is_past_in_utc(
     moment: datetime, *, is_overdue: bool
 ) -> None:
-    assert overdue(_open(Severity.LOW, REPAIR_DAY, 0), moment) is is_overdue
+    stands = Overdue(on=REPAIR_DAY) if is_overdue else Due(on=REPAIR_DAY)
+
+    assert standing(_open(Severity.LOW, REPAIR_DAY, 0), moment) == stands
 
 
-def test_an_unscheduled_write_up_is_not_overdue() -> None:
-    assert not overdue(_open(Severity.LOW, None, 0), _at(60 * 24 * 30))
-
-
-def test_a_resolved_write_up_is_not_overdue() -> None:
+def test_a_resolved_write_up_stands_as_its_state_however_late() -> None:
     state = _closed(Severity.LOW, resolved_at=0, as_of=0)
 
-    assert not overdue(state, _at(60 * 24 * 30))
-
-
-# Where a write-up stands.
-
-
-@pytest.mark.parametrize(
-    ("state", "stands"),
-    [
-        (_closed(Severity.HIGH, resolved_at=0, as_of=0), Standing.RESOLVED),
-        (_open(Severity.HIGH, None, 0), Standing.WAITING),
-        (_open(Severity.HIGH, date(2026, 1, 9), 0), Standing.OVERDUE),
-        (_open(Severity.HIGH, date(2026, 1, 10), 0), Standing.SCHEDULED),
-    ],
-)
-def test_a_write_up_stands_in_exactly_one_place(
-    state: Open | Closed, stands: Standing
-) -> None:
-    assert standing(state, T0) is stands
+    assert standing(state, _at(60 * 24 * 30)) == state
 
 
 # What an event may hold.
@@ -379,8 +355,8 @@ def test_an_event_rejects_a_time_with_no_zone() -> None:
 
 def test_a_state_allows_exactly_the_follow_ups_the_table_gives_it() -> None:
     assert allowed(_open(Severity.HIGH, None, 0)) == (
-        "scheduled",
-        "resolved",
-        "reclassified",
+        Kind.SCHEDULED,
+        Kind.RESOLVED,
+        Kind.RECLASSIFIED,
     )
-    assert allowed(_closed(Severity.HIGH, 5, 5)) == ("reopened", "reclassified")
+    assert allowed(_closed(Severity.HIGH, 5, 5)) == (Kind.REOPENED, Kind.RECLASSIFIED)

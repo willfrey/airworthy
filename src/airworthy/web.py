@@ -28,14 +28,17 @@ from airworthy.fleet import Cleared, Grounded, status_at
 from airworthy.model import Model, faults
 from airworthy.store import NotFoundError, Store
 from airworthy.writeup import (
+    Closed,
+    Due,
     FollowUp,
+    Overdue,
     Reclassified,
     RefusedError,
     Reopened,
     Reported,
     Resolved,
     Scheduled,
-    Standing,
+    Waiting,
     allowed,
     known_at,
     latest,
@@ -48,7 +51,7 @@ if TYPE_CHECKING:
     from fastapi import Request
 
     from airworthy.fleet import Aircraft, Status
-    from airworthy.writeup import Kind, State, WriteUp
+    from airworthy.writeup import Kind, Standing, State, WriteUp
 
 # Strict, so a template that names something the page wasn't given fails loudly
 # where the default would render it as nothing.
@@ -96,7 +99,17 @@ class Entry:
     state: State
     standing: Standing
     offers: tuple[Kind, ...]
-    """The kinds of follow-up the write-up's state allows."""
+    """The kinds of follow-up the write-up's state allows, in the order offered."""
+
+    @property
+    def stands(self) -> str:
+        """Where the write-up stood, in words."""
+        return _stands(self.standing)
+
+    @property
+    def urgent(self) -> bool:
+        """Whether it is open and either has no repair date or is past it."""
+        return isinstance(self.standing, Waiting | Overdue)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -106,6 +119,25 @@ class Row:
     aircraft: Aircraft
     grounding: tuple[WriteUp, ...]
     entries: tuple[Entry, ...]
+
+    @property
+    def open(self) -> int:
+        """How many of its write-ups were open."""
+        return sum(not isinstance(entry.standing, Closed) for entry in self.entries)
+
+    @property
+    def waiting(self) -> tuple[int, ...]:
+        """The ids of its write-ups that were open with no repair date."""
+        return self._standing(Waiting)
+
+    @property
+    def overdue(self) -> tuple[int, ...]:
+        """The ids of its write-ups that were open past their repair date."""
+        return self._standing(Overdue)
+
+    def _standing(self, kind: type[Waiting | Overdue]) -> tuple[int, ...]:
+        entries = self.entries
+        return tuple(e.write_up.id for e in entries if isinstance(e.standing, kind))
 
 
 class Serve(Protocol):
@@ -265,7 +297,7 @@ def _page(
     name: str, status: HTTPStatus = HTTPStatus.OK, **context: object
 ) -> HTMLResponse:
     template = ENVIRONMENT.get_template(name)
-    html = template.render(stamp=_stamp, told=_told, Standing=Standing, **context)
+    html = template.render(stamp=_stamp, told=_told, **context)
     return HTMLResponse(html, status_code=status)
 
 
@@ -275,6 +307,22 @@ def _back(tail: str) -> RedirectResponse:
 
 def _stamp(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime(STAMP)
+
+
+def _stands(standing: Standing) -> str:
+    """Say where a write-up stands, as the line under its title."""
+    match standing:
+        case Closed():
+            at = _stamp(standing.at)
+            return f"resolved by {standing.by} at {at}: {standing.note}"
+        case Waiting():
+            return "open, needs a repair date"
+        case Overdue():
+            return f"open, overdue: repair was set for {standing.on}"
+        case Due():
+            return f"open, repair set for {standing.on}"
+        case unreachable:
+            assert_never(unreachable)
 
 
 def _told(event: FollowUp) -> str:

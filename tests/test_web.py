@@ -184,7 +184,7 @@ def test_an_overdue_repair_is_told_with_the_date_it_was_set_for(
     assert _part(page, "status", "</p>") == "Cleared to fly"
     assert _part(page, "write-up-4", "</p>") == (
         "#4 Weather radar display flickers intermittently "
-        "medium severity, open, overdue : repair was set for 2026-03-01"
+        "medium severity, open, overdue: repair was set for 2026-03-01"
     )
 
 
@@ -526,3 +526,17 @@ def test_a_template_that_names_something_it_was_not_given_fails() -> None:
     """A misspelled name in a page must not render as nothing."""
     with pytest.raises(UndefinedError, match="'misspelled' is undefined"):
         _ = ENVIRONMENT.from_string("{{ misspelled }}").render()
+
+
+def test_only_a_write_up_waiting_or_overdue_is_marked_for_attention(
+    client: TestClient,
+) -> None:
+    """On N106AW, #8 waits for a repair date and #10 is resolved."""
+    page = client.get("/aircraft/N106AW").text
+    overdue = client.get("/aircraft/N103AW").text
+    waiting = page[page.index('id="write-up-8"') :]
+    resolved = page[page.index('id="write-up-10"') :]
+
+    assert '<p class="standing overdue">high severity, open, needs' in waiting
+    assert '<p class="standing">' in resolved.split("</p>")[0]
+    assert '<p class="standing overdue">medium severity, open, overdue' in overdue
