@@ -174,6 +174,11 @@ What the reviews changed, since that is where the agent's first drafts were wron
 - The suggestion PR (#7): both reviews found that the form's carried suggestion was
   trusted whole, so a suggestion could be recorded against a description the model
   never saw. The app now seals each suggestion to its description.
+- The fleet-questions PR (#10): the review found that what the tools returned never
+  named a status or a state, so a cleared aircraft reached the model as an empty
+  record. Each now carries its name. One design finding was left for time: the web
+  layer works out each write-up's state and each aircraft's status for the tools,
+  where the tools could do it from the store's own values.
 
 - These documents: a separate run checked the README's walk-through and sections 2
   to 4 here against the running app. It found the walk-through's past view leaving
