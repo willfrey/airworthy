@@ -53,7 +53,7 @@
     },
     {
       "tail": "N105AW",
-      "reported": {"kind": "reported", "at": "2026-01-14T08:00:00Z", "by": "Ana Reyes", "severity": "medium", "description": "Nose wheel steering feels stiff during taxi"},
+      "reported": {"kind": "reported", "at": "2026-01-14T08:00:00Z", "by": "Ana Reyes", "severity": "medium", "description": "Nose wheel steering feels stiff during taxi", "suggested": {"severity": "high", "reason": "Stiff nose wheel steering can mean a failing steering actuator, which affects directional control on the ground. A known benign cause, such as low tyre pressure already found and corrected, would lower this."}},
       "later": [
         {"kind": "scheduled", "at": "2026-01-14T09:00:00Z", "by": "Dee Park", "on": "2026-01-18"},
         {"kind": "reclassified", "at": "2026-01-14T15:00:00Z", "by": "Sam Okafor", "severity": "high", "reason": "Inspection found a seized steering actuator"}

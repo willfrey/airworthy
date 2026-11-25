@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.165.0",
     "jinja2>=3.1.6",
     "pydantic>=2.14",
+    "pydantic-ai-slim[anthropic]>=2.74.0",
     "python-multipart>=0.0.34",
     "uvicorn>=0.54.0",
 ]
@@ -360,7 +361,7 @@ exclude_type_checking_imports = true
 name = "layers"
 type = "layers"
 containers = ["airworthy"]
-layers = ["web", "seed", "store", "fleet", "writeup", "(model)"]
+layers = ["web", "seed", "triage", "store", "fleet", "writeup", "(model)"]
 exhaustive = true
 
 # --- mutation testing -------------------------------------------------------------

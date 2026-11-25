@@ -7,9 +7,14 @@ domain worded it.
 
 A page takes an `at` to show the fleet as it stood at a past moment. A past view has no
 forms: an action is always taken now, by the server's clock.
+
+With a suggester, the filing form can ask for a suggested severity. Asking files
+nothing, and the suggestion never fills in the severity: it is shown beside the choice
+and recorded with the report.
 """
 
 import argparse
+import os
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,12 +26,13 @@ import uvicorn
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pydantic import ConfigDict, ValidationError
+from pydantic import ConfigDict, Json, ValidationError
 
 from airworthy import seed
 from airworthy.fleet import Cleared, Grounded, status_at
 from airworthy.model import Model, faults
 from airworthy.store import NotFoundError, Store
+from airworthy.triage import NoSuggestionError, suggest
 from airworthy.writeup import (
     Closed,
     Due,
@@ -38,19 +44,23 @@ from airworthy.writeup import (
     Reported,
     Resolved,
     Scheduled,
+    Suggestion,
+    Text,
     Waiting,
     allowed,
+    downgraded,
     known_at,
     latest,
     standing,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from fastapi import Request
 
     from airworthy.fleet import Aircraft, Status
+    from airworthy.triage import Suggester
     from airworthy.writeup import Kind, Standing, State, WriteUp
 
 # Strict, so a template that names something the page wasn't given fails loudly
@@ -66,6 +76,10 @@ PROBLEM: Final = "problem.html"
 POST: Final = ["POST"]
 STAMP: Final = "%Y-%m-%d %H:%M UTC"
 DATABASE: Final = "airworthy.db"
+FILE: Final = "/aircraft/{tail}/write-ups"
+EVENTS: Final = "/write-ups/{write_up_id}/events"
+SUGGEST: Final = "/aircraft/{tail}/suggestion"
+API_KEY: Final = "ANTHROPIC_API_KEY"
 
 type Clock = Callable[[], datetime]
 """Tells the moment an action is taken; it must carry a time zone."""
@@ -85,6 +99,18 @@ class Action(Model):
     """A follow-up as a form posted it, its `kind` saying which one."""
 
     event: FollowUp
+
+
+class Described(Model):
+    """A description to ask a suggestion for."""
+
+    description: Text
+
+
+class Carried(Model):
+    """The suggestion a filing form carries back, as the JSON the page put in it."""
+
+    suggested: Json[Suggestion] | None = None
 
 
 class NotATimeError(Exception):
@@ -110,6 +136,8 @@ class Entry:
     standing: Standing
     offers: tuple[Kind, ...]
     """The kinds of follow-up the write-up's state allows, in the order offered."""
+    downgraded: bool
+    """Whether it was filed below the severity a model suggested."""
 
     @property
     def stands(self) -> Stands:
@@ -145,6 +173,22 @@ class Row:
         return tuple(e.write_up.id for e in entries if isinstance(e.standing, kind))
 
 
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Problem:
+    """Why a request was not carried out, in words for the person, and its status."""
+
+    text: str
+    status: HTTPStatus = HTTPStatus.BAD_REQUEST
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Draft:
+    """A write-up being filled in: what was typed, and the suggestion asked for."""
+
+    description: str
+    suggested: Suggestion | None
+
+
 class Serve(Protocol):
     """Serves an app on a port until stopped, as `uvicorn.run` does."""
 
@@ -159,58 +203,140 @@ class Options(argparse.Namespace):
     db: Path | None = None
 
 
-def create_app(store: Store, clock: Clock) -> FastAPI:
-    """Build the app over a store, taking the time of each action from `clock`."""
-    app = FastAPI()
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Pages:
+    """The pages and the actions, over one store and one clock."""
 
-    def board(at: str = "") -> HTMLResponse:
-        moment = _moment(at, clock())
-        rows = [_row(store, aircraft, moment) for aircraft in store.all_aircraft()]
+    store: Store
+    clock: Clock
+    suggests: bool
+    """Whether the filing form offers to suggest a severity."""
+
+    def page(
+        self,
+        tail: str,
+        moment: datetime,
+        *,
+        at: str = "",
+        problem: Problem | None = None,
+        draft: Draft | None = None,
+    ) -> HTMLResponse:
+        """Render an aircraft's page, with its problem's status when it has one."""
+        return _page(
+            AIRCRAFT,
+            HTTPStatus.OK if problem is None else problem.status,
+            at=at,
+            moment=moment,
+            row=_row(self.store, self.store.aircraft(tail), moment),
+            problem=problem,
+            draft=draft,
+            suggests=self.suggests,
+        )
+
+    def board(self, at: str = "") -> HTMLResponse:
+        """Show the fleet, now or as it stood at `at`."""
+        moment = _moment(at, self.clock())
+        fleet = self.store.all_aircraft()
+        rows = [_row(self.store, aircraft, moment) for aircraft in fleet]
         return _page(BOARD, at=at, moment=moment, rows=rows)
 
-    def aircraft(tail: str, at: str = "") -> HTMLResponse:
-        return _aircraft(store, tail, _moment(at, clock()), at=at)
+    def aircraft(self, tail: str, at: str = "") -> HTMLResponse:
+        """Show one aircraft, now or as it stood at `at`."""
+        return self.page(tail, _moment(at, self.clock()), at=at)
 
     def file(
-        tail: str, form: Annotated[ActionForm, Form()]
+        self, tail: str, form: Annotated[ActionForm, Form()]
     ) -> HTMLResponse | RedirectResponse:
-        now = clock()
-        fields = {**form.posted(), "at": now}
+        """File a write-up on an aircraft, with the suggestion its form carried."""
+        now = self.clock()
+        posted = form.posted()
+        carried = {"suggested": posted.get("suggested")}
         try:
+            suggested = Carried.model_validate(carried).suggested
+            fields = {**posted, "suggested": suggested, "at": now}
             reported = Reported.model_validate(fields)
         except ValidationError as error:
-            return _aircraft(store, tail, now, problem=_problems(error))
-        _ = store.file(tail, reported)
+            return self.page(tail, now, problem=Problem(text=_problems(error)))
+        _ = self.store.file(tail, reported)
         return _back(tail)
 
     def follow_up(
-        write_up_id: int, form: Annotated[ActionForm, Form()]
+        self, write_up_id: int, form: Annotated[ActionForm, Form()]
     ) -> HTMLResponse | RedirectResponse:
-        now = clock()
-        tail = store.write_up(write_up_id).tail
+        """Record a follow-up on a write-up, or say why it was refused."""
+        now = self.clock()
+        tail = self.store.write_up(write_up_id).tail
         fields = {"event": {**form.posted(), "at": now}}
         try:
-            store.append(write_up_id, Action.model_validate(fields).event)
+            self.store.append(write_up_id, Action.model_validate(fields).event)
         except ValidationError as error:
-            return _aircraft(store, tail, now, problem=_problems(error))
+            return self.page(tail, now, problem=Problem(text=_problems(error)))
         except RefusedError as error:
-            return _aircraft(store, tail, now, problem=str(error))
+            return self.page(tail, now, problem=Problem(text=str(error)))
         return _back(tail)
 
-    app.add_api_route("/", board)
-    app.add_api_route("/aircraft/{tail}", aircraft)
-    app.add_api_route(
-        "/aircraft/{tail}/write-ups", file, methods=POST, response_model=None
-    )
-    app.add_api_route(
-        "/write-ups/{write_up_id}/events", follow_up, methods=POST, response_model=None
-    )
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Triage:
+    """The route that asks for a suggested severity, which files nothing."""
+
+    pages: Pages
+    ask: Suggester
+
+    def suggestion(
+        self, tail: str, form: Annotated[ActionForm, Form()]
+    ) -> HTMLResponse:
+        """Show the filing form again with a suggestion for what was typed."""
+        now = self.pages.clock()
+        _ = self.pages.store.aircraft(tail)
+        described = {"description": form.posted().get("description", "")}
+        try:
+            description = Described.model_validate(described).description
+        except ValidationError as error:
+            problem = Problem(text=_problems(error))
+            return self.pages.page(tail, now, problem=problem)
+        try:
+            draft = Draft(description=description, suggested=self.ask(description))
+        except NoSuggestionError as error:
+            problem = Problem(text=str(error), status=HTTPStatus.BAD_GATEWAY)
+            kept = Draft(description=description, suggested=None)
+            return self.pages.page(tail, now, problem=problem, draft=kept)
+        return self.pages.page(tail, now, draft=draft)
+
+
+def create_app(
+    store: Store, clock: Clock, suggester: Suggester | None = None
+) -> FastAPI:
+    """Build the app over a store, taking the time of each action from `clock`.
+
+    Args:
+        store: Where the fleet and its write-ups are kept.
+        clock: Tells the moment of each action and of a page shown as of now.
+        suggester: Suggests a severity for a description. Without one the pages offer
+            no suggestion and the app has no route that asks for one.
+
+    Returns:
+        The app, ready to serve.
+    """
+    app = FastAPI()
+    pages = Pages(store=store, clock=clock, suggests=suggester is not None)
+    app.add_api_route("/", pages.board)
+    app.add_api_route("/aircraft/{tail}", pages.aircraft)
+    app.add_api_route(FILE, pages.file, methods=POST, response_model=None)
+    app.add_api_route(EVENTS, pages.follow_up, methods=POST, response_model=None)
+    if suggester is not None:
+        triage = Triage(pages=pages, ask=suggester)
+        app.add_api_route(SUGGEST, triage.suggestion, methods=POST)
     app.add_exception_handler(NotFoundError, _not_found)
     app.add_exception_handler(NotATimeError, _not_a_time)
     return app
 
 
-def main(argv: Sequence[str] | None = None, serve: Serve = uvicorn.run) -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    serve: Serve = uvicorn.run,
+    environ: Mapping[str, str] = os.environ,
+) -> None:
     """Serve the app, on a fresh copy of the sample fleet unless told otherwise.
 
     Args:
@@ -218,6 +344,8 @@ def main(argv: Sequence[str] | None = None, serve: Serve = uvicorn.run) -> None:
             to keep between runs, which gets the sample fleet only while it holds no
             aircraft.
         serve: Serves the app; a test passes one that returns.
+        environ: The environment. Severity suggestions are offered only when it holds
+            a key for the model.
     """
     parser = argparse.ArgumentParser()
     _ = parser.add_argument("--port", type=int)
@@ -230,7 +358,8 @@ def main(argv: Sequence[str] | None = None, serve: Serve = uvicorn.run) -> None:
     store = Store.at(database)
     if not store.all_aircraft():
         seed.load(store, _now())
-    serve(create_app(store, _now), port=options.port)
+    suggester = suggest if environ.get(API_KEY, "") != "" else None
+    serve(create_app(store, _now, suggester), port=options.port)
 
 
 def _now() -> datetime:
@@ -271,6 +400,7 @@ def _entry(write_up: WriteUp, moment: datetime) -> Entry:
         state=state,
         standing=standing(state, moment),
         offers=allowed(state),
+        downgraded=downgraded(write_up.reported),
     )
 
 
@@ -282,20 +412,6 @@ def _grounding(status: Status) -> tuple[WriteUp, ...]:
             return ()
         case unreachable:
             assert_never(unreachable)
-
-
-def _aircraft(
-    store: Store,
-    tail: str,
-    moment: datetime,
-    *,
-    at: str = "",
-    problem: str | None = None,
-) -> HTMLResponse:
-    """Render an aircraft's page, as a bad request when it carries a problem."""
-    row = _row(store, store.aircraft(tail), moment)
-    status = HTTPStatus.OK if problem is None else HTTPStatus.BAD_REQUEST
-    return _page(AIRCRAFT, status, at=at, moment=moment, row=row, problem=problem)
 
 
 def _page(
